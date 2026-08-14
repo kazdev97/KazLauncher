@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.4'
+APP_VERSION = 'v1.2.5'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20
@@ -2178,7 +2178,14 @@ class MinecraftLauncher(QWidget):
             else:
                 base_style = themes.get_dark_theme(accent_color=self.current_accent_color, glass_opacity=glass_opacity, secondary_accent=secondary)
         custom_style = '\n            QPushButton {\n                outline: none;\n            }\n            QTabBar::tab:nth-last-child(1), QTabBar::tab:nth-last-child(2) {\n                width: 60px;\n                padding: 10px 15px;\n            }\n            #cancelButton {\n                background-color: rgba(255, 85, 85, 0.88);\n                color: #fff;\n                border: 1px solid rgba(255, 120, 120, 0.35);\n            }\n            #cancelButton:hover {\n                background-color: rgba(255, 112, 112, 0.95);\n            }\n            #deleteSelectedButton {\n                background-color: rgba(255, 85, 85, 0.88);\n                padding: 5px 10px;\n                border-radius: 8px;\n            }\n            #deleteSelectedButton:hover {\n                background-color: rgba(255, 112, 112, 0.95);\n            }\n            #deleteSelectedButton:disabled {\n                background-color: rgba(80, 80, 90, 0.5);\n                color: #888;\n            }\n            #logoutAccountButton {\n                background-color: transparent;\n                color: #ff6b6b;\n                border: 1px solid rgba(255, 107, 107, 0.45);\n                border-radius: 13px;\n                font-size: 11px;\n                font-weight: bold;\n                padding: 0;\n            }\n            #logoutAccountButton:hover {\n                background-color: rgba(255, 107, 107, 0.15);\n                color: #ff8a8a;\n            }\n            #installStatusLabel {\n                color: #f8b339;\n                font-weight: bold;\n                padding: 6px 10px;\n                background-color: rgba(248, 179, 57, 0.08);\n                border: 1px solid rgba(248, 179, 57, 0.3);\n                border-radius: 8px;\n            }\n        '
-        self.setStyleSheet(base_style + custom_style)
+        full_style = base_style + custom_style
+        self.setStyleSheet(full_style)
+        # El viewport del QScrollArea de Configuración lleva un stylesheet propio
+        # (fondo transparente) que anula el tema en todos sus descendientes.
+        # Aplicar el tema también al contenedor interior restaura el estilo de
+        # los controles (botones con el color de acento del tema, etc.).
+        if hasattr(self, 'settings_tab_widget'):
+            self.settings_tab_widget.setStyleSheet(full_style)
         self._apply_window_shadows()
         self.update_title_glow()
     def _apply_window_shadows(self):
