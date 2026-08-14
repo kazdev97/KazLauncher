@@ -1033,6 +1033,10 @@ class MinecraftLauncher(QWidget):
         self.settings_scroll.setFrameShape(QFrame.NoFrame)
         self.settings_scroll.viewport().setAutoFillBackground(False)
         self.settings_scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        # El viewport del QScrollArea pinta por defecto el fondo de la paleta
+        # (gris/negro), ocultando el tema. Forzarlo transparente para que se
+        # vea el fondo de la pestaña del tema seleccionado.
+        self.settings_scroll.viewport().setStyleSheet('background: transparent;')
         self.settings_scroll.setWidget(self.settings_tab_widget)
         self.tab_widget.addTab(self.settings_scroll, self.settings_icon, '')
     def create_placeholder_tab(self, icon, tab_name):
