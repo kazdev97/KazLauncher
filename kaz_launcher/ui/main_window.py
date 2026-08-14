@@ -21,7 +21,7 @@ from typing import Optional
 import requests
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QPropertyAnimation, QEasingCurve, QSize, QPoint, QUrl, QByteArray
 from PySide6.QtGui import QFont, QFontDatabase, QIcon, QPixmap, QColor, QStandardItemModel, QStandardItem, QDesktopServices
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QProgressBar, QFrame, QCheckBox, QSlider, QTabWidget, QTextEdit, QButtonGroup, QRadioButton, QGraphicsDropShadowEffect, QColorDialog, QListWidget, QListWidgetItem, QMessageBox, QSizeGrip, QFileDialog, QDialog, QStackedWidget, QAbstractItemView, QInputDialog, QScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QProgressBar, QFrame, QCheckBox, QSlider, QTabWidget, QTextEdit, QButtonGroup, QRadioButton, QGraphicsDropShadowEffect, QColorDialog, QListWidget, QListWidgetItem, QMessageBox, QSizeGrip, QFileDialog, QDialog, QStackedWidget, QAbstractItemView, QInputDialog, QScrollArea, QApplication
 import minecraft_launcher_lib
 from minecraft_launcher_lib import microsoft_account
 from minecraft_launcher_lib.exceptions import InvalidRefreshToken, AzureAppNotPermitted, AccountNotOwnMinecraft
@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.7'
+APP_VERSION = 'v1.2.8'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20
@@ -2068,7 +2068,7 @@ class MinecraftLauncher(QWidget):
         # normal (después de exec()), no desde el bucle anidado del diálogo.
         if getattr(self, '_update_applied', False):
             self._update_applied = False
-            QTimer.singleShot(300, self._quit_after_update)
+            QTimer.singleShot(100, self._quit_after_update)
     def _show_update_message_in_dialog(self, message: str):
         """Muestra un mensaje dentro del diálogo de actualización abierto.
         Nunca se abre un QMessageBox encima de un diálogo modal: quedaría
@@ -2142,15 +2142,20 @@ class MinecraftLauncher(QWidget):
             dialog.show_update_ready(self.lang_dict.get('update_download_done', 'Actualización lista. El launcher se cerrará y se reabrirá automáticamente.'))
         self._set_update_link_state(False)
     def _quit_after_update(self):
-        """Cierra la app y, si algo la retiene, la fuerza a salir a los 5 s."""
+        """Cierra la app al instante: oculta la ventana y, si algo la retiene,
+        fuerza la salida a los 3 s (respaldo que no bloquea el apagado)."""
+        self.hide()
         app = QApplication.instance()
         if app:
             app.quit()
         # Respaldo independiente del event loop de Qt: si algún hilo bloquea la
         # salida, se fuerza la terminación para que el finalizador pueda reemplazar
         # el exe (los procesos que retengan el archivo se cierran igualmente).
+        # Con daemon=True el respaldo no retiene el proceso cuando todo termina bien.
         import threading
-        threading.Timer(5.0, lambda: os._exit(0)).start()
+        timer = threading.Timer(3.0, lambda: os._exit(0))
+        timer.daemon = True
+        timer.start()
     def on_theme_style_changed(self, index: int):
         if index < 0:
             return None

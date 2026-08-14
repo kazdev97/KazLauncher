@@ -5,7 +5,7 @@ consultar el manifest remoto, descargar el exe nuevo, verificar su SHA-256 y
 lanzar un finalizador oculto que reemplaza y relanza el launcher.
 
 Manifest (JSON):
-    {"version": "v1.2.7", "url": "https://.../KazLauncher.exe", "sha256": "<hex>"}
+    {"version": "v1.2.8", "url": "https://.../KazLauncher.exe", "sha256": "<hex>"}
 """
 from __future__ import annotations
 
