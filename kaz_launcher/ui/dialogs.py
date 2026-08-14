@@ -202,6 +202,17 @@ class UpdateDialog(QDialog):
         self.close_button.setVisible(True)
         if self.status_info.get('is_update_available'):
             self.update_button.setVisible(True)
+    def show_update_ready(self, message: str):
+        """Descarga terminada: muestra el aviso en el propio diálogo (evita
+        ventanas modales superpuestas que queden detrás) y deja un botón
+        Aceptar que cierra el diálogo para que el launcher salga y se reabra."""
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(100)
+        self.progress_label.setText(message)
+        self.update_button.setVisible(False)
+        self.close_button.setText(self.lang_dict.get('ok', 'Aceptar'))
+        self.close_button.setEnabled(True)
+        self.close_button.setVisible(True)
     def set_styles(self):
         accent = self.parent().current_accent_color if self.parent() else '#1DB954'
         # Contraste automático: texto oscuro sobre acentos claros (p. ej. botón blanco).

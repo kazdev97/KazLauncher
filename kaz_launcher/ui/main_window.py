@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.5'
+APP_VERSION = 'v1.2.6'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20
@@ -337,6 +337,7 @@ class MinecraftLauncher(QWidget):
         self._versions_selected_instance_dir = ''
         self._versions_selected_source = ''
         self._prelaunch_update_pending = None
+        self._update_applied = False
         self.current_language = 'es'
         self.lang_dict = resources.LANGUAGES[self.current_language]
         self.current_accent_color = self.settings.get('accent_color', '#1DB954')
@@ -2062,6 +2063,21 @@ class MinecraftLauncher(QWidget):
         dialog.exec()
         if getattr(self, '_update_dialog', None) is dialog:
             self._update_dialog = None
+        # Si la descarga terminó y el usuario pulsó Aceptar, salir para que el
+        # finalizador reemplace y relance el exe. Se dispara desde el flujo
+        # normal (después de exec()), no desde el bucle anidado del diálogo.
+        if getattr(self, '_update_applied', False):
+            self._update_applied = False
+            QTimer.singleShot(300, self._quit_after_update)
+    def _show_update_message_in_dialog(self, message: str):
+        """Muestra un mensaje dentro del diálogo de actualización abierto.
+        Nunca se abre un QMessageBox encima de un diálogo modal: quedaría
+        detrás y bloquearía el flujo."""
+        dialog = getattr(self, '_update_dialog', None)
+        if dialog and getattr(dialog, 'show_download_failed', None):
+            dialog.show_download_failed(message)
+        else:
+            QMessageBox.information(self, self.lang_dict.get('update_status_title', 'Actualización'), message)
     def _ensure_writable_dir(self, directory: str) -> bool:
         probe = os.path.join(directory, '.kazlauncher_write_test')
         try:
@@ -2076,15 +2092,15 @@ class MinecraftLauncher(QWidget):
         info = getattr(self, '_update_info', None) or {}
         exe_path = updater.get_launcher_exe_path()
         if not exe_path:
-            QMessageBox.information(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_not_frozen', 'La actualización automática solo está disponible en el ejecutable compilado.'))
+            self._show_update_message_in_dialog(self.lang_dict.get('update_not_frozen', 'La actualización automática solo está disponible en el ejecutable compilado.'))
             return
         url = info.get('url') or ''
         if not url:
-            QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_manifest_missing', 'No hay un servidor de actualizaciones configurado.'))
+            self._show_update_message_in_dialog(self.lang_dict.get('update_manifest_missing', 'No hay un servidor de actualizaciones configurado.'))
             return
         exe_dir = os.path.dirname(exe_path)
         if not self._ensure_writable_dir(exe_dir):
-            QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_apply_failed', 'No se pudo instalar la actualización: {msg}').format(msg='La carpeta del launcher no tiene permisos de escritura. Mueve KazLauncher.exe a una carpeta con permisos (p. ej. Documentos).'))
+            self._show_update_message_in_dialog(self.lang_dict.get('update_apply_failed', 'No se pudo instalar la actualización: {msg}').format(msg='La carpeta del launcher no tiene permisos de escritura. Mueve KazLauncher.exe a una carpeta con permisos (p. ej. Documentos).'))
             return
         dest_path = os.path.join(exe_dir, 'KazLauncher_new.exe')
         try:
@@ -2111,26 +2127,20 @@ class MinecraftLauncher(QWidget):
         if not ok:
             message = self.lang_dict.get('update_download_failed', 'Error al descargar la actualización: {msg}').format(msg=error)
             self._set_update_link_state(False)
-            dialog = getattr(self, '_update_dialog', None)
-            if dialog and getattr(dialog, 'show_download_failed', None):
-                dialog.show_download_failed(message)
-            QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), message)
+            self._show_update_message_in_dialog(message)
             return
         exe_path = updater.get_launcher_exe_path()
         if not exe_path or not updater.spawn_apply_update(dest_path, exe_path):
             message = self.lang_dict.get('update_apply_failed', 'No se pudo instalar la actualización: {msg}').format(msg='No se pudo lanzar el instalador de la actualización.')
-            dialog = getattr(self, '_update_dialog', None)
-            if dialog and getattr(dialog, 'show_download_failed', None):
-                dialog.show_download_failed(message)
-            QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), message)
+            self._show_update_message_in_dialog(message)
             return
-        QMessageBox.information(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_download_done', 'Actualización lista. El launcher se cerrará y se reabrirá automáticamente.'))
+        # Éxito: el aviso se muestra en el propio diálogo (nunca un QMessageBox
+        # encima de un diálogo modal, que quedaría detrás y bloquearía el flujo).
+        self._update_applied = True
         dialog = getattr(self, '_update_dialog', None)
-        if dialog:
-            dialog.close()
-            self._update_dialog = None
+        if dialog and getattr(dialog, 'show_update_ready', None):
+            dialog.show_update_ready(self.lang_dict.get('update_download_done', 'Actualización lista. El launcher se cerrará y se reabrirá automáticamente.'))
         self._set_update_link_state(False)
-        QTimer.singleShot(400, self._quit_after_update)
     def _quit_after_update(self):
         """Cierra la app y, si algo la retiene, la fuerza a salir a los 5 s."""
         app = QApplication.instance()
