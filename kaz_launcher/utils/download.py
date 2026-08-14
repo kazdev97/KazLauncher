@@ -43,10 +43,21 @@ def _backoff_seconds(attempt: int, base: float) -> float:
     return delay + random.uniform(0, delay * 0.3)
 
 
+def is_winerror_32(exc: BaseException) -> bool:
+    """True si el error es un archivo bloqueado por otro proceso (WinError 32)."""
+    if isinstance(exc, OSError):
+        return getattr(exc, 'winerror', None) == 32 or getattr(exc, 'errno', None) == 32
+    return False
+
+
 def friendly_download_error(exc: BaseException, fallback: str = '') -> str:
-    """Convierte un error de red en un mensaje claro para el usuario final."""
+    """Convierte un error de red o de archivo en un mensaje claro para el usuario final."""
     text = str(exc or '').strip()
     lower = text.lower()
+    if is_winerror_32(exc):
+        return ('Un archivo necesario está bloqueado por otro proceso (WinError 32). '
+                'Cierra Minecraft/Java si están abiertos y desactiva temporalmente el antivirus, '
+                'luego vuelve a intentarlo.')
     if '10054' in lower or 'forcibly closed' in lower or 'connection aborted' in lower or 'connection reset' in lower:
         return ('Se cortó la conexión mientras se descargaba (error 10054). '
                 'Revisa tu conexión a internet y, si falla otra vez, desactiva temporalmente '
@@ -147,7 +158,7 @@ def download_file_with_retries(
                             on_progress(min(downloaded, total), total)
                 if total > 0 and downloaded < total:
                     raise requests.exceptions.ChunkedEncodingError(f'Descarga incompleta: {downloaded}/{total} bytes')
-            os.replace(part_path, dest_path)
+            _replace_with_retry(part_path, dest_path)
             return
         except Exception as exc:
             if not is_retryable_http_error(exc):
@@ -170,16 +181,33 @@ def download_file_with_retries(
     raise requests.ConnectionError(last_error) from last_error
 
 
+def _replace_with_retry(part_path: str, dest_path: str) -> None:
+    """Renombra de forma atómica tolerando bloqueos transitorios (WinError 32).
+
+    El antivirus o un proceso que escanea el destino pueden bloquear el renombrado
+    unos instantes; se reintenta con una pequeña espera antes de rendirse.
+    """
+    for attempt in range(1, 4):
+        try:
+            os.replace(part_path, dest_path)
+            return
+        except OSError as exc:
+            if not is_winerror_32(exc) or attempt >= 3:
+                raise
+            time.sleep(1.0 + attempt)
+
+
 def run_install_with_retries(fn: Callable[[], Any], *, on_retry: RetryCallback = None, max_attempts: int = 6, backoff: float = 2.5) -> Any:
     """Ejecuta una instalación de minecraft_launcher_lib reintentándola si hay
-    cortes de red. La instalación es idempotente: archivos ya completos se omiten
+    cortes de red o archivos bloqueados transitoriamente (WinError 32).
+    La instalación es idempotente: archivos ya completos se omiten
     y archivos parciales se vuelven a descargar."""
     last_error: Optional[BaseException] = None
     for attempt in range(1, max_attempts + 1):
         try:
             return fn()
         except Exception as exc:
-            if not is_retryable_http_error(exc):
+            if not is_retryable_http_error(exc) and not is_winerror_32(exc):
                 raise
             last_error = exc
             if on_retry:

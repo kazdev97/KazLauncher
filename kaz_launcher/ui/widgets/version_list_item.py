@@ -8,9 +8,10 @@ class VersionListItemWidget(QWidget):
     open_folder_requested = Signal(str)
     rename_requested = Signal(str)
     selection_changed = Signal(str, bool)
-    def __init__(self, base_version, version_types, icons, lang_dict, parent=None, can_rename=True):
+    def __init__(self, base_version, display_name, version_types, icons, lang_dict, parent=None, can_rename=True):
         super().__init__(parent)
         self.base_version = base_version
+        self.display_name = display_name
         self.version_types = version_types
         self.icons = icons
         self.lang_dict = lang_dict
@@ -42,7 +43,7 @@ class VersionListItemWidget(QWidget):
         icon_label.setAlignment(Qt.AlignCenter)
         info_layout = QVBoxLayout()
         info_layout.setSpacing(2)
-        self.id_label = QLabel(self.base_version)
+        self.id_label = QLabel(self.display_name)
         self.id_label.setObjectName('versionIdLabel')
         details_layout = QHBoxLayout()
         types_text = ', '.join(self.version_types)

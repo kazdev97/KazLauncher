@@ -8,13 +8,7 @@ import logging
 import time
 from typing import Any, Callable
 import requests
-from .download import _backoff_seconds, is_retryable_http_error, run_install_with_retries
-
-
-def _is_winerror_32(exc: BaseException) -> bool:
-    if isinstance(exc, OSError):
-        return getattr(exc, 'winerror', None) == 32 or getattr(exc, 'errno', None) == 32
-    return False
+from .download import _backoff_seconds, is_retryable_http_error, is_winerror_32, run_install_with_retries
 
 
 def run_forge_install_tolerant(
@@ -38,7 +32,7 @@ def run_forge_install_tolerant(
             run_install_with_retries(install_fn, max_attempts=2, backoff=1.5)
             return
         except Exception as exc:
-            win32 = _is_winerror_32(exc)
+            win32 = is_winerror_32(exc)
             if not win32 and not is_retryable_http_error(exc):
                 raise
             last_error = exc

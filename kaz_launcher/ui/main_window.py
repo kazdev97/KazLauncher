@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.6'
+APP_VERSION = 'v1.2.7'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20
@@ -2474,7 +2474,7 @@ class MinecraftLauncher(QWidget):
                 card_widget = self.mod_list_item_map[project_id]
                 card_widget.is_installed = False
                 card_widget.update_view()
-    def reinstall_version(self, version_id, instance_dir=None):
+    def reinstall_version(self, version_id, instance_dir=None, refresh=True):
         effective_dir = instance_dir or (self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory)
         version_path = os.path.join(effective_dir, 'versions', version_id)
         self.log_to_console(f'Attempting to reinstall version {version_id}. Path: {version_path}')
@@ -2488,7 +2488,7 @@ class MinecraftLauncher(QWidget):
                 QMessageBox.critical(self, 'Error', f'Could not delete folder \'{version_path}\'.\nCheck if the game is running or delete it manually.', QMessageBox.Ok)
         else:
             self.log_to_console(f'Version folder \'{version_id}\' not found for deletion.')
-        if self.tab_widget.currentWidget() == self.versions_tab_widget:
+        if refresh and self.tab_widget.currentWidget() == self.versions_tab_widget:
             self.refresh_installed_versions_list()
     def log_to_console(self, message):
         self.console_output.append(message)
@@ -2856,7 +2856,7 @@ class MinecraftLauncher(QWidget):
                     item.setSizeHint(QSize(0, 85))
                     item.setData(Qt.UserRole, {'instance_dir': instance_dir, 'source': source, 'base_version': base_version})
                     display_name = f'{base_version} — {instance_name}'
-                    widget = VersionListItemWidget(display_name, version_types, self.version_management_icons, self.lang_dict, can_rename=can_rename)
+                    widget = VersionListItemWidget(base_version, display_name, version_types, self.version_management_icons, self.lang_dict, can_rename=can_rename)
                     widget.delete_requested.connect(partial(self.handle_version_action, 'delete', base_version, instance_dir))
                     widget.repair_requested.connect(partial(self.handle_version_action, 'repair', base_version, instance_dir))
                     widget.open_folder_requested.connect(partial(self.handle_version_action, 'open_folder', base_version, instance_dir))
@@ -3068,10 +3068,13 @@ class MinecraftLauncher(QWidget):
                 confirm_text = self.lang_dict.get('confirm_multi_delete_text', 'Are you sure you want to delete the following {count} versions?\n\n - {versions}').format(count=len(versions_to_delete), versions=versions_list_str)
                 reply = QMessageBox.question(self, confirm_title, confirm_text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 if reply == QMessageBox.Yes:
-                    self.log_to_console(f'Starting deletion of {len(versions_to_delete)} selected versions...')
+                    targets = []
                     for key in sorted(self.selected_versions_for_deletion):
                         instance_dir = key[0]
                         for version_id in self.grouped_versions.get(key, []):
-                            self.reinstall_version(version_id, instance_dir)
+                            targets.append((instance_dir, version_id))
+                    self.log_to_console(f'Starting deletion of {len(targets)} selected versions...')
+                    for instance_dir, version_id in targets:
+                        self.reinstall_version(version_id, instance_dir, refresh=False)
                     self.log_to_console('Deletion complete.')
                     self.refresh_installed_versions_list()
