@@ -35,4 +35,4 @@ latest.json
 *.pfx
 *.p12
 *.pem
-packaging/selfsign/certs/
+packaging/selfsign/certs/*.vsix

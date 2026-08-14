@@ -1,0 +1,11 @@
+{
+  "name": "kaz-launcher-puter-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python -m http.server 8000"
+  },
+  "dependencies": {
+    "@heyputer/puter.js": "latest"
+  }
+}
