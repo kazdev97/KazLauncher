@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -19,11 +20,8 @@ from typing import Callable, Optional
 
 from kaz_launcher.utils.download import download_file_with_retries, request_with_retries
 
-# ── PUNTO DE CONFIGURACIÓN ──────────────────────────────────────────────────
-# Cambia esta URL al manifest de tu servidor. Mientras esté vacía, la
-# comprobación informa que no hay servidor de actualizaciones configurado.
-UPDATE_MANIFEST_URL = ''
-# ────────────────────────────────────────────────────────────────────────────
+# Manifest de actualizaciones (latest.json publicado junto al exe en GitHub Releases).
+UPDATE_MANIFEST_URL = 'https://github.com/kazdev97/KazLauncher/releases/latest/download/latest.json'
 
 ProgressCallback = Optional[Callable[[int, int], None]]
 StatusCallback = Optional[Callable[[str], None]]
@@ -76,7 +74,10 @@ def fetch_update_manifest(url: str = '', timeout: float = 20) -> dict:
     if not url:
         raise RuntimeError('update_manifest_missing')
     response = request_with_retries('GET', url, timeout=timeout, max_attempts=3)
-    data = response.json()
+    try:
+        data = json.loads(response.content.decode('utf-8-sig'))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f'El manifest de actualización no es JSON válido: {exc}')
     if not data.get('version') or not data.get('url'):
         raise RuntimeError('El manifest de actualización no contiene version/url.')
     return data

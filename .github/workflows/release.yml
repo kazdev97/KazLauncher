@@ -1,0 +1,45 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pyinstaller
+
+      - name: Build executable
+        run: pyinstaller KazLauncher.spec --noconfirm
+
+      - name: Create update manifest
+        shell: pwsh
+        run: |
+          $sha = (Get-FileHash dist/KazLauncher.exe -Algorithm SHA256).Hash.ToLower()
+          $manifest = @{
+            version = $env:GITHUB_REF_NAME
+            url     = "https://github.com/${{ github.repository }}/releases/latest/download/KazLauncher.exe"
+            sha256  = $sha
+          } | ConvertTo-Json -Compress
+          [System.IO.File]::WriteAllText("$pwd/latest.json", $manifest, [System.Text.Encoding]::ASCII)
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/KazLauncher.exe
+            latest.json
