@@ -1,0 +1,38 @@
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+venv/
+.venv/
+env/
+.env
+HruHruLauncher-Setup.iss
+jdk-installer.exe
+HruHruLauncher-Setup-v1.0.exe
+HruHruLauncher-Setup.exe
+
+build/
+dist/
+*.egg-info/
+
+# Respaldo local de estilos (no subir)
+backup/
+
+# Artefactos del auto-actualizador
+KazLauncher_new.exe
+latest.json
+
+# Metadatos locales del editor/agente
+.freebuff/
+
+.idea/
+.vscode/
+
+*.log
+
+# Certificados de firma (nunca subir al repositorio)
+*.pfx
+*.p12
+*.pem
+packaging/selfsign/certs/

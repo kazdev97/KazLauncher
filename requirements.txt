@@ -1,0 +1,7 @@
+PySide6
+PySide6-Addons
+minecraft-launcher-lib
+requests
+tomli
+psutil
+pypresence
