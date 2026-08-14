@@ -96,6 +96,21 @@ def get_neumorphism_theme(accent_color='#1DB954', secondary_accent=None):
             color: {text_muted};
             font-size: 8pt;
         }}
+        #updateLinkButton {{
+            background: transparent;
+            border: none;
+            color: {text_muted};
+            text-decoration: underline;
+            font-size: 8pt;
+            padding: 2px 4px;
+        }}
+        #updateLinkButton:hover {{
+            color: {accent_color};
+        }}
+        #updateLinkButton[updateAvailable="true"] {{
+            color: {accent_color};
+            font-weight: bold;
+        }}
 
         /* —— Campos (inset) —— */
         QComboBox, QLineEdit {{
@@ -587,6 +602,21 @@ def get_skeuomorphism_theme(accent_color='#1DB954', secondary_accent=None):
         #versionStatusLabel {{
             color: {text_muted};
             font-size: 8pt;
+        }}
+        #updateLinkButton {{
+            background: transparent;
+            border: none;
+            color: {text_muted};
+            text-decoration: underline;
+            font-size: 8pt;
+            padding: 2px 4px;
+        }}
+        #updateLinkButton:hover {{
+            color: {accent_color};
+        }}
+        #updateLinkButton[updateAvailable="true"] {{
+            color: {accent_color};
+            font-weight: bold;
         }}
 
         /* —— Campos tallados en piedra (inset) —— */
@@ -1176,6 +1206,21 @@ def get_skeuomorphism_dark_theme(accent_color='#1DB954', glass_opacity=88, secon
             color: {text_muted};
             font-size: 8pt;
         }}
+        #updateLinkButton {{
+            background: transparent;
+            border: none;
+            color: {text_muted};
+            text-decoration: underline;
+            font-size: 8pt;
+            padding: 2px 4px;
+        }}
+        #updateLinkButton:hover {{
+            color: {accent_color};
+        }}
+        #updateLinkButton[updateAvailable="true"] {{
+            color: {accent_color};
+            font-weight: bold;
+        }}
 
         /* —— Campos tallados (inset) —— */
         QComboBox, QLineEdit {{
@@ -1742,6 +1787,21 @@ def get_glassmorphism_theme(accent_color='#1DB954', glass_opacity=88, gradient_c
         #versionStatusLabel {{
             color: {text_muted};
             font-size: 8pt;
+        }}
+        #updateLinkButton {{
+            background: transparent;
+            border: none;
+            color: {text_muted};
+            text-decoration: underline;
+            font-size: 8pt;
+            padding: 2px 4px;
+        }}
+        #updateLinkButton:hover {{
+            color: {accent_color};
+        }}
+        #updateLinkButton[updateAvailable="true"] {{
+            color: {accent_color};
+            font-weight: bold;
         }}
 
         /* —— Campos de cristal esmerilado —— */

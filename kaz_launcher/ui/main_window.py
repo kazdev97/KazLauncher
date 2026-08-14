@@ -21,7 +21,7 @@ from typing import Optional
 import requests
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QPropertyAnimation, QEasingCurve, QSize, QPoint, QUrl, QByteArray
 from PySide6.QtGui import QFont, QFontDatabase, QIcon, QPixmap, QColor, QStandardItemModel, QStandardItem, QDesktopServices
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QProgressBar, QFrame, QCheckBox, QSlider, QTabWidget, QTextEdit, QButtonGroup, QRadioButton, QGraphicsDropShadowEffect, QColorDialog, QListWidget, QListWidgetItem, QMessageBox, QSizeGrip, QFileDialog, QDialog, QStackedWidget, QAbstractItemView, QInputDialog, QProgressDialog
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QProgressBar, QFrame, QCheckBox, QSlider, QTabWidget, QTextEdit, QButtonGroup, QRadioButton, QGraphicsDropShadowEffect, QColorDialog, QListWidget, QListWidgetItem, QMessageBox, QSizeGrip, QFileDialog, QDialog, QStackedWidget, QAbstractItemView, QInputDialog, QProgressDialog, QScrollArea
 import minecraft_launcher_lib
 from minecraft_launcher_lib import microsoft_account
 from minecraft_launcher_lib.exceptions import InvalidRefreshToken, AzureAppNotPermitted, AccountNotOwnMinecraft
@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.2-beta'
+APP_VERSION = 'v1.2.3'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20
@@ -442,6 +442,13 @@ class MinecraftLauncher(QWidget):
         self.version_status_label.setFont(self.minecraft_font)
         self.update_version_display()
         bottom_bar_layout.addWidget(self.version_status_label)
+        self.check_updates_button = QPushButton()
+        self.check_updates_button.setObjectName('updateLinkButton')
+        self.check_updates_button.setFont(self.minecraft_font)
+        self.check_updates_button.setCursor(Qt.PointingHandCursor)
+        self.check_updates_button.setFocusPolicy(Qt.NoFocus)
+        self.check_updates_button.clicked.connect(self.check_for_updates)
+        bottom_bar_layout.addWidget(self.check_updates_button)
         size_grip = QSizeGrip(self)
         bottom_bar_layout.addWidget(size_grip, 0, Qt.AlignBottom | Qt.AlignRight)
         main_layout.addLayout(bottom_bar_layout)
@@ -908,11 +915,13 @@ class MinecraftLauncher(QWidget):
         self.accent_color_label = QLabel()
         self.accent_color_label.setFont(self.subtitle_font)
         self.color_picker_button = QPushButton()
+        self.color_picker_button.setFixedHeight(36)
         self.color_picker_button.clicked.connect(self.open_color_picker)
         self.color_preview = QLabel()
         self.color_preview.setObjectName('colorPreview')
         self.color_preview.setFixedSize(33, 33)
         self.color_picker_secondary_button = QPushButton()
+        self.color_picker_secondary_button.setFixedHeight(36)
         self.color_picker_secondary_button.clicked.connect(partial(self.open_color_picker, 'secondary'))
         self.color_preview_secondary = QLabel()
         self.color_preview_secondary.setObjectName('colorPreview')
@@ -940,18 +949,6 @@ class MinecraftLauncher(QWidget):
         theme_style_row.addWidget(self.theme_style_combo)
         theme_style_row.addWidget(self.glass_extras_btn)
         theme_style_row.addStretch()
-        self.updates_label = QLabel()
-        self.updates_label.setFont(self.subtitle_font)
-        self.update_status_label = QLabel()
-        self.update_status_label.setObjectName('loginStatusLabel')
-        self.update_status_label.setWordWrap(True)
-        self.check_updates_button = QPushButton()
-        self.check_updates_button.setObjectName('glassExtrasButton')
-        self.check_updates_button.setFixedHeight(36)
-        self.check_updates_button.clicked.connect(self.check_for_updates)
-        update_row = QHBoxLayout()
-        update_row.addWidget(self.update_status_label, 1)
-        update_row.addWidget(self.check_updates_button)
         self.memory_label = QLabel()
         self.memory_label.setFont(self.subtitle_font)
         self.memory_slider = QSlider(Qt.Horizontal)
@@ -978,8 +975,10 @@ class MinecraftLauncher(QWidget):
         resolution_layout = QHBoxLayout()
         self.resolution_width_input = QLineEdit(self.settings.get('resolution_width', '1280'))
         self.resolution_width_input.setPlaceholderText('Width')
+        self.resolution_width_input.setFixedHeight(36)
         self.resolution_height_input = QLineEdit(self.settings.get('resolution_height', '720'))
         self.resolution_height_input.setPlaceholderText('Height')
+        self.resolution_height_input.setFixedHeight(36)
         resolution_layout.addWidget(self.resolution_width_input)
         resolution_layout.addWidget(QLabel('x'))
         resolution_layout.addWidget(self.resolution_height_input)
@@ -1007,8 +1006,6 @@ class MinecraftLauncher(QWidget):
         settings_layout.addSpacing(6)
         settings_layout.addLayout(theme_style_row)
         settings_layout.addSpacing(10)
-        settings_layout.addWidget(self.updates_label)
-        settings_layout.addLayout(update_row)
         settings_layout.addSpacing(10)
         settings_layout.addWidget(self.memory_label)
         memory_layout = QHBoxLayout()
@@ -1031,7 +1028,13 @@ class MinecraftLauncher(QWidget):
         settings_layout.addWidget(self.ui_opacity_hint)
         settings_layout.addStretch()
         settings_layout.addWidget(self.advanced_settings_button)
-        self.tab_widget.addTab(self.settings_tab_widget, self.settings_icon, '')
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setFrameShape(QFrame.NoFrame)
+        self.settings_scroll.viewport().setAutoFillBackground(False)
+        self.settings_scroll.setStyleSheet('QScrollArea { background: transparent; border: none; }')
+        self.settings_scroll.setWidget(self.settings_tab_widget)
+        self.tab_widget.addTab(self.settings_scroll, self.settings_icon, '')
     def create_placeholder_tab(self, icon, tab_name):
         widget = QWidget()
         widget.setObjectName(tab_name)
@@ -1942,10 +1945,8 @@ class MinecraftLauncher(QWidget):
         if hasattr(self, 'glass_extras_btn'):
             self.glass_extras_btn.setText(lang.get('glass_extras_btn', 'Extras'))
             self.glass_extras_btn.setToolTip(lang.get('glass_gradient_title', 'Degradado de fondo (Glass)'))
-        if hasattr(self, 'updates_label'):
-            self.updates_label.setText(lang.get('updates_section', 'Actualizaciones'))
         if hasattr(self, 'check_updates_button'):
-            self.check_updates_button.setText(lang.get('check_updates_btn', 'Buscar actualizaciones'))
+            self._set_update_link_state(getattr(self, '_update_available', False))
         if hasattr(self, 'theme_style_combo'):
             self.theme_style_combo.blockSignals(True)
             self.theme_style_combo.clear()
@@ -2011,40 +2012,44 @@ class MinecraftLauncher(QWidget):
         if not hasattr(self, 'check_updates_button'):
             return
         self._update_check_silent = silent
-        self.check_updates_button.setEnabled(False)
         self.check_updates_button.setText(self.lang_dict.get('checking_updates', 'Buscando actualizaciones...'))
-        self.update_status_label.setText(self.lang_dict.get('checking_updates', 'Buscando actualizaciones...'))
         worker = updater.UpdateCheckWorker(APP_VERSION, parent=self)
         self.update_check_worker = worker
         worker.finished_check.connect(self._on_update_check_finished)
         worker.start()
     def _on_update_check_finished(self, ok, info):
         silent = getattr(self, '_update_check_silent', False)
-        self.check_updates_button.setEnabled(True)
-        self.check_updates_button.setText(self.lang_dict.get('check_updates_btn', 'Buscar actualizaciones'))
         if not ok:
+            self._set_update_link_state(False)
             error = str((info or {}).get('error') or '')
-            if error == 'update_manifest_missing':
-                self.update_status_label.setText(self.lang_dict.get('update_manifest_missing', 'No hay un servidor de actualizaciones configurado.'))
-            else:
-                self.update_status_label.setText(self.lang_dict.get('error_checking_updates', 'Error al buscar actualizaciones'))
             if not silent:
-                message = self.update_status_label.text()
+                message = self.lang_dict.get('error_checking_updates', 'Error al buscar actualizaciones')
                 if error and error != 'update_manifest_missing':
                     message = f'{message}\n\n{error}'
                 QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), message)
             return
         available = bool(info.get('update_available'))
         remote_version = info.get('version', '')
+        self._set_update_link_state(available)
         if available:
             text = self.lang_dict.get('update_available', 'Hay una nueva versión disponible: {version}').format(version=remote_version)
         else:
             text = self.lang_dict.get('latest_version', 'Tienes la última versión')
-        self.update_status_label.setText(text)
         self._update_info = info
         if silent and not available:
             return
         self._show_update_dialog({'is_update_available': available, 'text': text, 'info': info})
+    def _set_update_link_state(self, available: bool = False):
+        """Estado del enlace de actualización que acompaña a la versión."""
+        self._update_available = bool(available)
+        if self._update_available:
+            self.check_updates_button.setText(self.lang_dict.get('update_available_link', 'Nueva actualización disponible'))
+        else:
+            self.check_updates_button.setText(self.lang_dict.get('check_updates_btn', 'Buscar actualizaciones'))
+        self.check_updates_button.setProperty('updateAvailable', self._update_available)
+        style = self.check_updates_button.style()
+        style.unpolish(self.check_updates_button)
+        style.polish(self.check_updates_button)
     def _show_update_dialog(self, status_info):
         fonts = {'main': self.minecraft_font, 'subtitle': self.subtitle_font}
         dialog = UpdateDialog(status_info, fonts, self.lang_dict, self)
@@ -2109,7 +2114,7 @@ class MinecraftLauncher(QWidget):
             self._update_progress_dialog = None
         if not ok:
             message = self.lang_dict.get('update_download_failed', 'Error al descargar la actualización: {msg}').format(msg=error)
-            self.update_status_label.setText(self.lang_dict.get('error_checking_updates', 'Error al buscar actualizaciones'))
+            self._set_update_link_state(False)
             QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), message)
             return
         exe_path = updater.get_launcher_exe_path()
@@ -2117,7 +2122,7 @@ class MinecraftLauncher(QWidget):
             QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_apply_failed', 'No se pudo instalar la actualización: {msg}').format(msg='No se pudo lanzar el instalador de la actualización.'))
             return
         QMessageBox.information(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_download_done', 'Actualización lista. El launcher se cerrará y se reabrirá automáticamente.'))
-        self.update_status_label.setText(self.lang_dict.get('latest_version', 'Tienes la última versión'))
+        self._set_update_link_state(False)
         QTimer.singleShot(400, self._quit_after_update)
     def _quit_after_update(self):
         QApplication.instance().quit()
@@ -2202,7 +2207,7 @@ class MinecraftLauncher(QWidget):
             else:
                 if self._install_anim_timer.isActive():
                     self._install_anim_timer.stop()
-                self.launch_button.setText('')
+                self.launch_button.setText(self.lang_dict.get('launch', 'JUGAR'))
                 self.launch_button.setIcon(self.play_icon)
     def _tick_install_anim(self):
         if not getattr(self, '_installing', False):
