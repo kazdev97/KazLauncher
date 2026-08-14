@@ -5,7 +5,7 @@ consultar el manifest remoto, descargar el exe nuevo, verificar su SHA-256 y
 lanzar un finalizador oculto que reemplaza y relanza el launcher.
 
 Manifest (JSON):
-    {"version": "v1.2.3", "url": "https://.../KazLauncher.exe", "sha256": "<hex>"}
+    {"version": "v1.2.4", "url": "https://.../KazLauncher.exe", "sha256": "<hex>"}
 """
 from __future__ import annotations
 
@@ -114,23 +114,38 @@ def download_update(url: str, dest_path: str, on_progress: ProgressCallback = No
 def spawn_apply_update(new_exe: str, old_exe: str) -> bool:
     """Lanza un finalizador oculto que reemplaza old_exe por new_exe y lo abre.
 
-    El finalizador espera hasta 90 s a que el launcher actual salga (libera el
-    lock del exe), borra el viejo, mueve el nuevo y lo vuelve a lanzar.
+    El finalizador:
+      1) espera hasta 120 s a que el launcher actual salga (libera el lock del exe);
+      2) si sigue bloqueado, fuerza el cierre de los procesos cuyo ejecutable sea
+         old_exe (el bootloader de onefile retiene el archivo);
+      3) borra el viejo, mueve el nuevo y lo vuelve a lanzar;
+      4) escribe KazLauncher_updater.log junto al exe para poder depurar fallos.
     """
     if sys.platform != 'win32':
         return False
     if not new_exe or not old_exe or not os.path.isfile(new_exe):
         return False
+    log_path = os.path.join(os.path.dirname(os.path.abspath(old_exe)), 'KazLauncher_updater.log')
     ps = (
         "$ErrorActionPreference='SilentlyContinue';"
         "$old='" + str(old_exe).replace("'", "''") + "';"
         "$new='" + str(new_exe).replace("'", "''") + "';"
-        "$i=0;"
-        "while($i -lt 180){ Start-Sleep -Milliseconds 500;"
-        "  try{ Remove-Item -LiteralPath $old -Force -ErrorAction Stop; break }catch{};"
-        "  $i++ };"
-        "if(Test-Path -LiteralPath $new){ Move-Item -LiteralPath $new -Destination $old -Force };"
-        "if(Test-Path -LiteralPath $old){ Start-Process -FilePath $old };"
+        "$log='" + str(log_path).replace("'", "''") + "';"
+        "function Log($m){ try{ Add-Content -LiteralPath $log -Value ((Get-Date -Format 'HH:mm:ss') + ' ' + $m) }catch{} };"
+        "Log 'Finalizador iniciado';"
+        "$deadline=(Get-Date).AddSeconds(120);"
+        "while((Get-Date) -lt $deadline){"
+        "  try{ Remove-Item -LiteralPath $old -Force -ErrorAction Stop; Log 'Exe anterior eliminado'; break }catch{}"
+        "  Start-Sleep -Milliseconds 500 };"
+        "if(Test-Path -LiteralPath $old){"
+        "  Log 'Exe anterior aun bloqueado; cerrando procesos que lo usan';"
+        "  Get-CimInstance Win32_Process -Filter \"Name='" + os.path.basename(old_exe).replace("'", "''") + "'\" -ErrorAction SilentlyContinue | "
+        "    Where-Object { $_.ExecutablePath -eq $old } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue };"
+        "  Start-Sleep -Seconds 2;"
+        "  Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue };"
+        "if(Test-Path -LiteralPath $new){ Move-Item -LiteralPath $new -Destination $old -Force; Log 'Nuevo exe colocado' };"
+        "if(Test-Path -LiteralPath $old){ Start-Process -FilePath $old; Log 'Nuevo exe lanzado' }"
+        "else{ Log 'ERROR: no se pudo reemplazar el ejecutable' };"
     )
     try:
         encoded = base64.b64encode(ps.encode('utf-16-le')).decode('ascii')

@@ -1,7 +1,7 @@
 from functools import partial
 from PySide6.QtCore import Qt, Signal, QPropertyAnimation, QEasingCurve, QSize
 from PySide6.QtGui import QPixmap, QColor
-from PySide6.QtWidgets import QDialog, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QCheckBox, QComboBox, QColorDialog
+from PySide6.QtWidgets import QDialog, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit, QFileDialog, QCheckBox, QComboBox, QColorDialog, QProgressBar
 from kaz_launcher.config import resources
 from .widgets import AnimatedButton
 class FixErrorDialog(QDialog):
@@ -100,6 +100,7 @@ class UpdateDialog(QDialog):
         self.status_info = status_info
         self.fonts = fonts
         self.lang_dict = lang_dict
+        self._update_started = False
         self.icons = {'check': b'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#78f542" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z"></path></svg>', 'download': b'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="#ff5555" viewBox="0 0 256 256"><path d="M208,152v48a8,8,0,0,1-8,8H56a8,8,0,0,1-8-8V152a8,8,0,0,1,16,0v40H192V152a8,8,0,0,1,16,0Zm-85.66,5.66a8,8,0,0,0,11.32,0l48-48a8,8,0,0,0-11.32-11.32L136,132.69V40a8,8,0,0,0-16,0v92.69L85.66,98.34a8,8,0,0,0-11.32,11.32Z"></path></svg>'}
         self.init_ui()
         self.setWindowOpacity(0)
@@ -114,7 +115,7 @@ class UpdateDialog(QDialog):
     def init_ui(self):
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Dialog)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setFixedSize(400, 220)
+        self.setFixedSize(420, 275)
         container = QFrame(self)
         container.setObjectName('updateDialogContainer')
         main_layout = QVBoxLayout(container)
@@ -135,29 +136,80 @@ class UpdateDialog(QDialog):
         message_label.setWordWrap(True)
         info_layout.addWidget(icon_label)
         info_layout.addWidget(message_label, 1)
+        # Zona de progreso (oculta hasta que se inicia la descarga).
+        self.progress_label = QLabel('')
+        self.progress_label.setObjectName('updateProgressLabel')
+        self.progress_label.setFont(self.fonts['main'])
+        self.progress_label.setWordWrap(True)
+        self.progress_label.setVisible(False)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName('updateProgressBar')
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFixedHeight(22)
+        self.progress_bar.setVisible(False)
         button_layout = QHBoxLayout()
         self.update_button = AnimatedButton(self.lang_dict.get('update_button', 'Update'))
         self.update_button.setObjectName('updateButton')
         self.update_button.setFont(self.fonts['main'])
         self.update_button.setVisible(self.status_info['is_update_available'])
-        self.update_button.clicked.connect(self.update_requested.emit)
-        close_button = AnimatedButton(self.lang_dict.get('close', 'Close'))
-        close_button.setObjectName('closeButton')
-        close_button.setFont(self.fonts['main'])
-        close_button.clicked.connect(self.close)
+        self.update_button.clicked.connect(self.start_update)
+        self.close_button = AnimatedButton(self.lang_dict.get('close', 'Close'))
+        self.close_button.setObjectName('closeButton')
+        self.close_button.setFont(self.fonts['main'])
+        self.close_button.clicked.connect(self.close)
         button_layout.addStretch()
         button_layout.addWidget(self.update_button)
-        button_layout.addWidget(close_button)
+        button_layout.addWidget(self.close_button)
         main_layout.addWidget(title_label)
         main_layout.addLayout(info_layout)
+        main_layout.addWidget(self.progress_label)
+        main_layout.addWidget(self.progress_bar)
         main_layout.addStretch()
         main_layout.addLayout(button_layout)
         outer_layout = QVBoxLayout(self)
         outer_layout.addWidget(container)
         self.set_styles()
+    def start_update(self):
+        """El usuario pulsa «Actualizar»: muestra la barra de progreso y avisa al launcher."""
+        if self._update_started:
+            return
+        self._update_started = True
+        self.update_button.setVisible(False)
+        self.close_button.setEnabled(False)
+        self.progress_label.setVisible(True)
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        self.progress_label.setText(self.lang_dict.get('update_downloading', 'Descargando actualización... {pct}%').format(pct=0))
+        self.update_requested.emit()
+    def set_progress(self, pct: int):
+        """Actualiza la barra de progreso de la descarga."""
+        pct = max(0, min(100, int(pct)))
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(pct)
+        self.progress_label.setText(self.lang_dict.get('update_downloading', 'Descargando actualización... {pct}%').format(pct=pct))
+    def set_status(self, message: str):
+        """Texto de estado (descargando / verificando integridad...)."""
+        self.progress_label.setText(message)
+        self.progress_bar.setVisible(message != 'Verificando integridad...')
+    def show_download_failed(self, message: str):
+        """Vuelve al estado inicial y muestra el error para reintentar o cerrar."""
+        self._update_started = False
+        self.progress_label.setText(message)
+        self.progress_bar.setVisible(False)
+        self.close_button.setEnabled(True)
+        self.close_button.setVisible(True)
+        if self.status_info.get('is_update_available'):
+            self.update_button.setVisible(True)
     def set_styles(self):
         accent = self.parent().current_accent_color if self.parent() else '#1DB954'
-        self.setStyleSheet(f'\n            #updateDialogContainer {{ background-color: #282a36; border-radius: 10px; border: 1px solid #44475a; }}\n            #updateDialogTitle {{ color: #f8f8f2; }}\n            #updateDialogMessage {{ color: #bd93f9; }}\n            QPushButton {{ outline: none; }}\n            #updateButton, #closeButton {{ color: #f8f8f2; padding: 8px 16px; border-radius: 5px; }}\n            #updateButton {{ background-color: {accent}; }}\n            #closeButton {{ background-color: #6272a4; }}\n        ')
+        # Contraste automático: texto oscuro sobre acentos claros (p. ej. botón blanco).
+        color = QColor(accent)
+        luminance = 0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue()
+        button_text = '#0c0c10' if luminance > 150 else '#f8f8f2'
+        hover_color = color.lighter(112).name() if luminance > 150 else color.darker(112).name()
+        self.setStyleSheet(f'\n            #updateDialogContainer {{ background-color: #282a36; border-radius: 10px; border: 1px solid #44475a; }}\n            #updateDialogTitle {{ color: #f8f8f2; }}\n            #updateDialogMessage {{ color: #bd93f9; }}\n            #updateProgressLabel {{ color: #f8f8f2; font-size: 9pt; }}\n            #updateProgressBar {{ background-color: #44475a; border: 1px solid #6272a4; border-radius: 5px; text-align: center; }}\n            #updateProgressBar::chunk {{ background-color: {accent}; border-radius: 5px; }}\n            QPushButton {{ outline: none; }}\n            #updateButton, #closeButton {{ padding: 8px 16px; border-radius: 5px; font-weight: bold; }}\n            #updateButton {{ background-color: {accent}; color: {button_text}; }}\n            #updateButton:hover {{ background-color: {hover_color}; }}\n            #closeButton {{ background-color: #6272a4; color: #f8f8f2; }}\n        ')
 class VersionSelectionDialog(QDialog):
     def __init__(self, title, prompt, versions, action_text, lang_dict, parent=None):
         super().__init__(parent)

@@ -21,7 +21,7 @@ from typing import Optional
 import requests
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QPropertyAnimation, QEasingCurve, QSize, QPoint, QUrl, QByteArray
 from PySide6.QtGui import QFont, QFontDatabase, QIcon, QPixmap, QColor, QStandardItemModel, QStandardItem, QDesktopServices
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QProgressBar, QFrame, QCheckBox, QSlider, QTabWidget, QTextEdit, QButtonGroup, QRadioButton, QGraphicsDropShadowEffect, QColorDialog, QListWidget, QListWidgetItem, QMessageBox, QSizeGrip, QFileDialog, QDialog, QStackedWidget, QAbstractItemView, QInputDialog, QProgressDialog, QScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QProgressBar, QFrame, QCheckBox, QSlider, QTabWidget, QTextEdit, QButtonGroup, QRadioButton, QGraphicsDropShadowEffect, QColorDialog, QListWidget, QListWidgetItem, QMessageBox, QSizeGrip, QFileDialog, QDialog, QStackedWidget, QAbstractItemView, QInputDialog, QScrollArea
 import minecraft_launcher_lib
 from minecraft_launcher_lib import microsoft_account
 from minecraft_launcher_lib.exceptions import InvalidRefreshToken, AzureAppNotPermitted, AccountNotOwnMinecraft
@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.3'
+APP_VERSION = 'v1.2.4'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20
@@ -2053,8 +2053,11 @@ class MinecraftLauncher(QWidget):
     def _show_update_dialog(self, status_info):
         fonts = {'main': self.minecraft_font, 'subtitle': self.subtitle_font}
         dialog = UpdateDialog(status_info, fonts, self.lang_dict, self)
+        self._update_dialog = dialog
         dialog.update_requested.connect(self.start_update_download)
         dialog.exec()
+        if getattr(self, '_update_dialog', None) is dialog:
+            self._update_dialog = None
     def _ensure_writable_dir(self, directory: str) -> bool:
         probe = os.path.join(directory, '.kazlauncher_write_test')
         try:
@@ -2089,43 +2092,51 @@ class MinecraftLauncher(QWidget):
         self._update_download_worker.progress.connect(self._on_update_download_progress)
         self._update_download_worker.status.connect(self._on_update_download_status)
         self._update_download_worker.finished_download.connect(self._on_update_download_finished)
-        self._update_progress_dialog = QProgressDialog('', '', 0, 100, self)
-        self._update_progress_dialog.setWindowTitle(self.lang_dict.get('update_status_title', 'Actualización'))
-        self._update_progress_dialog.setLabelText(self.lang_dict.get('update_downloading', 'Descargando actualización... {pct}%').format(pct=0))
-        self._update_progress_dialog.setCancelButton(None)
-        self._update_progress_dialog.setValue(0)
-        self._update_progress_dialog.setMinimumDuration(0)
-        self._update_progress_dialog.setWindowModality(Qt.WindowModal)
-        self._update_progress_dialog.show()
         self._update_download_worker.start()
     def _on_update_download_progress(self, value: int):
-        if getattr(self, '_update_progress_dialog', None):
-            self._update_progress_dialog.setValue(value)
+        dialog = getattr(self, '_update_dialog', None)
+        if dialog and getattr(dialog, 'set_progress', None):
+            dialog.set_progress(value)
     def _on_update_download_status(self, message: str):
-        if getattr(self, '_update_progress_dialog', None):
+        dialog = getattr(self, '_update_dialog', None)
+        if dialog and getattr(dialog, 'set_status', None):
             if message == 'Verificando integridad...':
                 message = self.lang_dict.get('update_verifying', 'Verificando integridad...')
-            self._update_progress_dialog.setLabelText(message)
+            dialog.set_status(message)
     def _on_update_download_finished(self, ok, dest_path, error):
-        dialog = getattr(self, '_update_progress_dialog', None)
-        if dialog:
-            dialog.close()
-            dialog.deleteLater()
-            self._update_progress_dialog = None
         if not ok:
             message = self.lang_dict.get('update_download_failed', 'Error al descargar la actualización: {msg}').format(msg=error)
             self._set_update_link_state(False)
+            dialog = getattr(self, '_update_dialog', None)
+            if dialog and getattr(dialog, 'show_download_failed', None):
+                dialog.show_download_failed(message)
             QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), message)
             return
         exe_path = updater.get_launcher_exe_path()
         if not exe_path or not updater.spawn_apply_update(dest_path, exe_path):
-            QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_apply_failed', 'No se pudo instalar la actualización: {msg}').format(msg='No se pudo lanzar el instalador de la actualización.'))
+            message = self.lang_dict.get('update_apply_failed', 'No se pudo instalar la actualización: {msg}').format(msg='No se pudo lanzar el instalador de la actualización.')
+            dialog = getattr(self, '_update_dialog', None)
+            if dialog and getattr(dialog, 'show_download_failed', None):
+                dialog.show_download_failed(message)
+            QMessageBox.warning(self, self.lang_dict.get('update_status_title', 'Actualización'), message)
             return
         QMessageBox.information(self, self.lang_dict.get('update_status_title', 'Actualización'), self.lang_dict.get('update_download_done', 'Actualización lista. El launcher se cerrará y se reabrirá automáticamente.'))
+        dialog = getattr(self, '_update_dialog', None)
+        if dialog:
+            dialog.close()
+            self._update_dialog = None
         self._set_update_link_state(False)
         QTimer.singleShot(400, self._quit_after_update)
     def _quit_after_update(self):
-        QApplication.instance().quit()
+        """Cierra la app y, si algo la retiene, la fuerza a salir a los 5 s."""
+        app = QApplication.instance()
+        if app:
+            app.quit()
+        # Respaldo independiente del event loop de Qt: si algún hilo bloquea la
+        # salida, se fuerza la terminación para que el finalizador pueda reemplazar
+        # el exe (los procesos que retengan el archivo se cierran igualmente).
+        import threading
+        threading.Timer(5.0, lambda: os._exit(0)).start()
     def on_theme_style_changed(self, index: int):
         if index < 0:
             return None

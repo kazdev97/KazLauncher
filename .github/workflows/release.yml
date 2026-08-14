@@ -21,7 +21,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pyinstaller
+        # pyinstaller fijado a la versión con la que se construye localmente:
+        # evita diferencias en el empaquetado de DLLs entre builds.
+        run: pip install -r requirements.txt "pyinstaller==6.21.0"
 
       - name: Build executable
         run: pyinstaller KazLauncher.spec --noconfirm
