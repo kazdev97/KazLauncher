@@ -212,6 +212,50 @@ class ModpackVerifyWorker(QThread):
         else:
             success, msg = remote_modpack.verify_remote_instance(self.manifest, self.instance_dir, self.lang_dict)
         self.finished.emit(success, msg)
+class PreLaunchModsCheckWorker(QThread):
+    """Verifica mods de una instancia remota contra su manifest antes de jugar."""
+    finished = Signal(object, object, str)
+    def __init__(self, minecraft_dir, instance_dir, manifest_url, cached_manifests, lang_dict, parent=None):
+        super().__init__(parent)
+        self.minecraft_dir = minecraft_dir
+        self.instance_dir = instance_dir
+        self.manifest_url = manifest_url
+        self.cached_manifests = list(cached_manifests or [])
+        self.lang_dict = lang_dict
+    @staticmethod
+    def find_manifest(minecraft_dir, instance_dir, manifest_url, cached_manifests):
+        target = os.path.normcase(os.path.abspath(instance_dir))
+        folder_name = os.path.basename(instance_dir.rstrip('\\/'))
+        meta = load_instance_meta(instance_dir)
+        def matches(manifest):
+            try:
+                resolved = remote_modpack.resolve_instance_dir(minecraft_dir, manifest)
+            except Exception:
+                resolved = ''
+            if resolved and os.path.normcase(os.path.abspath(resolved)) == target:
+                return True
+            manifest_name = remote_modpack.sanitize_instance_name(manifest.get('name', ''))
+            meta_name = remote_modpack.sanitize_instance_name(meta.get('name', ''))
+            return manifest_name == folder_name or manifest_name == meta_name
+        for entry in cached_manifests:
+            manifest = entry.get('manifest') or {}
+            if manifest and matches(manifest):
+                return manifest
+        for manifest in remote_modpack.fetch_remote_manifests(manifest_url):
+            if matches(manifest):
+                return manifest
+        return None
+    def run(self):
+        from kaz_launcher.core.instance_sync import verify_remote_mods
+        try:
+            manifest = self.find_manifest(self.minecraft_dir, self.instance_dir, self.manifest_url, self.cached_manifests)
+            if not manifest:
+                self.finished.emit(None, None, '')
+                return
+            report = verify_remote_mods(manifest, self.instance_dir, self.lang_dict)
+            self.finished.emit(manifest, report, '')
+        except Exception as exc:
+            self.finished.emit(None, None, str(exc))
 class ManualInstallWorker(QThread):
     finished = Signal(bool, str, object)
     progress_status = Signal(str)
@@ -228,35 +272,32 @@ class ManualInstallWorker(QThread):
         self.finished.emit(ok, msg, {'version_id': version_id, 'instance_dir': instance_dir, 'loader': self.loader})
 class VersionSizeScannerWorker(QThread):
     finished = Signal(dict, int)
-    def __init__(self, versions_path, version_ids, parent=None):
+    def __init__(self, instance_dirs, parent=None):
         super().__init__(parent)
-        self.versions_path = versions_path
-        self.version_ids = version_ids
+        self.instance_dirs = list(instance_dirs or [])
     @staticmethod
     def get_dir_size(path):
         total = 0
         try:
-            for entry in os.scandir(path):
-                if entry.is_file():
-                    total += entry.stat().st_size
-                else:
-                    if entry.is_dir():
-                        total += VersionSizeScannerWorker.get_dir_size(entry.path)
-        except (NotADirectoryError, FileNotFoundError, PermissionError):
+            for root, dirs, files in os.walk(path, followlinks=False):
+                for name in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, name))
+                    except OSError:
+                        pass
+        except OSError:
             return 0
         return total
     def run(self):
         sizes = {}
         total_size = 0
-        for version_id in self.version_ids:
+        for instance_dir in self.instance_dirs:
             if self.isInterruptionRequested():
                 return
-            else:
-                version_path = os.path.join(self.versions_path, version_id)
-                if os.path.isdir(version_path):
-                    size = self.get_dir_size(version_path)
-                    sizes[version_id] = size
-                    total_size += size
+            if os.path.isdir(instance_dir):
+                size = self.get_dir_size(instance_dir)
+                sizes[instance_dir] = size
+                total_size += size
         if not self.isInterruptionRequested():
             self.finished.emit(sizes, total_size)
 class MinecraftLauncher(QWidget):
@@ -293,6 +334,9 @@ class MinecraftLauncher(QWidget):
         self._refreshing_account_combo = False
         self._refreshing_version_combo = False
         self._select_instance_on_refresh = None
+        self._versions_selected_instance_dir = ''
+        self._versions_selected_source = ''
+        self._prelaunch_update_pending = None
         self.current_language = 'es'
         self.lang_dict = resources.LANGUAGES[self.current_language]
         self.current_accent_color = self.settings.get('accent_color', '#1DB954')
@@ -411,7 +455,7 @@ class MinecraftLauncher(QWidget):
     def start_minecraft(self):
         if self.worker and self.worker.isRunning():
             return
-        if getattr(self, '_installing', False) or (self.modpack_install_worker and self.modpack_install_worker.isRunning()) or (hasattr(self, 'manual_install_worker') and self.manual_install_worker and self.manual_install_worker.isRunning()) or (hasattr(self, '_mrpack_worker') and self._mrpack_worker and self._mrpack_worker.isRunning()):
+        if getattr(self, '_installing', False) or (self.modpack_install_worker and self.modpack_install_worker.isRunning()) or (hasattr(self, 'manual_install_worker') and self.manual_install_worker and self.manual_install_worker.isRunning()) or (hasattr(self, '_mrpack_worker') and self._mrpack_worker and self._mrpack_worker.isRunning()) or (getattr(self, '_prelaunch_mods_worker', None) and self._prelaunch_mods_worker.isRunning()) or (getattr(self, 'modpack_verify_worker', None) and self.modpack_verify_worker.isRunning()):
             return
         else:
             auth = None
@@ -449,14 +493,69 @@ class MinecraftLauncher(QWidget):
                 needs_22 = self._detect_version_needs_java22(selected_version, effective_dir)
                 min_java = 22 if needs_22 else None
                 self._pending_launch = {'username': username, 'auth': auth, 'selected_version': selected_version, 'jvm_args_list': jvm_args_list, 'required_java': min_java}
-                self.progress_bar.setFormat(self.lang_dict.get('java_installing', 'Preparando Java...'))
-                self.log_to_console(self.lang_dict.get('java_installing', 'Preparando Java...'))
-                preferred_java = (self.settings.get('java_path') or '').strip() or None
-                versions_dir = os.path.join(effective_dir, 'versions') if effective_dir else None
-                self.java_ensure_worker = JavaEnsureWorker(selected_version, preferred_java, self, min_major=min_java, versions_dir=versions_dir)
-                self.java_ensure_worker.status.connect(self._on_java_ensure_status)
-                self.java_ensure_worker.finished.connect(self._on_java_ensure_finished)
-                self.java_ensure_worker.start()
+                self._maybe_verify_mods_before_launch(launch_instance_dir)
+    def _maybe_verify_mods_before_launch(self, instance_dir):
+        if not instance_dir or not self._is_remote_instance_dir(instance_dir):
+            self._start_java_ensure()
+            return
+        cached = list(getattr(self, 'detected_remote_modpacks', []) or [])
+        self._prelaunch_instance_dir = instance_dir
+        self._prelaunch_mods_worker = PreLaunchModsCheckWorker(self.minecraft_directory, instance_dir, MODPACK_MANIFEST_URL, cached, self.lang_dict, self)
+        self._prelaunch_mods_worker.finished.connect(self._on_prelaunch_mods_check_finished)
+        self._prelaunch_mods_worker.start()
+        msg = self.lang_dict.get('verifying_mods_before_launch', 'Verificando mods...')
+        self.progress_bar.setFormat(msg)
+        self.log_to_console(msg)
+    def _on_prelaunch_mods_check_finished(self, manifest, report, error):
+        pending = getattr(self, '_pending_launch', None)
+        if not pending:
+            return
+        if error or not manifest:
+            if error:
+                self.log_to_console(self.lang_dict.get('prelaunch_mods_check_failed', 'No se pudo verificar los mods remotos: {msg}').format(msg=error))
+            self._start_java_ensure()
+            return
+        if report and report.errors:
+            self.log_to_console(self.lang_dict.get('prelaunch_mods_check_failed', 'No se pudo verificar los mods remotos: {msg}').format(msg=report.errors[0]))
+            self._start_java_ensure()
+            return
+        if report and report.up_to_date:
+            self.log_to_console(self.lang_dict.get('mods_up_to_date_launch', 'Los mods de esta instancia están actualizados.'))
+            self._start_java_ensure()
+            return
+        lang = self.lang_dict
+        details = report.format_diff_details(lang) if report else ''
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle('Modpack')
+        box.setText(lang.get('mods_update_before_launch', 'Hay actualizaciones de mods para esta instancia:\n\n{details}\n\n¿Actualizarlas antes de jugar?').format(details=details))
+        box.setStandardButtons(QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel)
+        box.button(QMessageBox.Yes).setText(lang.get('modpack_update_mods_btn', 'Actualizar mods'))
+        box.button(QMessageBox.No).setText(lang.get('mods_update_skip_btn', 'Jugar sin actualizar'))
+        box.button(QMessageBox.Cancel).setText(lang.get('cancel_button', 'Cancelar'))
+        reply = box.exec()
+        if reply == QMessageBox.Cancel:
+            self._pending_launch = None
+            self.launch_control_stack.setCurrentIndex(0)
+            return
+        if reply == QMessageBox.No:
+            self._start_java_ensure()
+            return
+        self._prelaunch_update_pending = pending['selected_version']
+        self._start_modpack_mods_update(manifest, getattr(self, '_prelaunch_instance_dir', '') or self.selected_instance_dir or '')
+    def _start_java_ensure(self):
+        pending = getattr(self, '_pending_launch', None)
+        if not pending:
+            return
+        self.progress_bar.setFormat(self.lang_dict.get('java_installing', 'Preparando Java...'))
+        self.log_to_console(self.lang_dict.get('java_installing', 'Preparando Java...'))
+        preferred_java = (self.settings.get('java_path') or '').strip() or None
+        effective_dir = self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory
+        versions_dir = os.path.join(effective_dir, 'versions') if effective_dir else None
+        self.java_ensure_worker = JavaEnsureWorker(pending['selected_version'], preferred_java, self, min_major=pending.get('required_java'), versions_dir=versions_dir)
+        self.java_ensure_worker.status.connect(self._on_java_ensure_status)
+        self.java_ensure_worker.finished.connect(self._on_java_ensure_finished)
+        self.java_ensure_worker.start()
     def _on_java_ensure_status(self, message: str):
         self.progress_bar.setFormat(message)
         self.log_to_console(message)
@@ -538,13 +637,21 @@ class MinecraftLauncher(QWidget):
         from kaz_launcher.discord_presence import update_discord_playing
         update_discord_playing(display_name, mc_version=selected_version, loader=self.current_version_type or '')
     def cancel_launch(self):
-        if getattr(self, 'java_ensure_worker', None) and self.java_ensure_worker.isRunning():
-            self.java_ensure_worker.terminate()
-            self.java_ensure_worker.wait(500)
+        prelaunch = getattr(self, '_prelaunch_mods_worker', None)
+        if prelaunch and prelaunch.isRunning():
+            prelaunch.terminate()
+            prelaunch.wait(500)
+            self._pending_launch = None
             self.launch_control_stack.setCurrentIndex(0)
-            self.log_to_console('Java setup cancelled.')
+            self.log_to_console('Launch cancelled.')
         else:
-            if self.worker and self.worker.isRunning():
+            if getattr(self, 'java_ensure_worker', None) and self.java_ensure_worker.isRunning():
+                self.java_ensure_worker.terminate()
+                self.java_ensure_worker.wait(500)
+                self.launch_control_stack.setCurrentIndex(0)
+                self.log_to_console('Java setup cancelled.')
+            else:
+                if self.worker and self.worker.isRunning():
                     self.worker.stop()
                     self.cancel_button.setEnabled(False)
                     self.cancel_button.setText(self.lang_dict.get('cancelling', 'Cancelling...'))
@@ -1143,6 +1250,7 @@ class MinecraftLauncher(QWidget):
         self.installed_versions_list = QListWidget()
         self.installed_versions_list.setObjectName('modList')
         self.installed_versions_list.setSpacing(5)
+        self.installed_versions_list.currentItemChanged.connect(self._on_versions_current_item_changed)
         versions_layout.addLayout(top_bar_layout)
         versions_layout.addLayout(size_info_layout)
         versions_layout.addWidget(self.installed_versions_list, 1)
@@ -1511,10 +1619,20 @@ class MinecraftLauncher(QWidget):
         if not hasattr(self, 'remote_instance_verify_btn'):
             return
         else:
-            instance_dir = self.selected_instance_dir or self.settings.get('selected_instance_dir', '')
-            is_remote = self._is_remote_instance_dir(instance_dir)
+            instance_dir = getattr(self, '_versions_selected_instance_dir', '') or ''
+            source = getattr(self, '_versions_selected_source', '') or ''
+            is_remote = bool(instance_dir) and source == 'remote'
             self.remote_instance_verify_btn.setVisible(is_remote)
             self.remote_instance_verify_btn.setEnabled(is_remote)
+    def _on_versions_current_item_changed(self, current, previous):
+        data = current.data(Qt.UserRole) if current else None
+        if isinstance(data, dict):
+            self._versions_selected_instance_dir = data.get('instance_dir', '') or ''
+            self._versions_selected_source = data.get('source', '') or ''
+        else:
+            self._versions_selected_instance_dir = ''
+            self._versions_selected_source = ''
+        self._update_remote_verify_button()
     def _start_modpack_mods_update(self, manifest: dict, instance_dir: str):
         self.remote_instance_verify_btn.setEnabled(False)
         self.remote_instance_verify_btn.setText(self.lang_dict.get('verifying_modpack', 'Verificando...'))
@@ -1555,7 +1673,7 @@ class MinecraftLauncher(QWidget):
         if getattr(self, 'modpack_verify_worker', None) and self.modpack_verify_worker.isRunning():
             return
         else:
-            instance_dir = self.selected_instance_dir or self.settings.get('selected_instance_dir', '')
+            instance_dir = getattr(self, '_versions_selected_instance_dir', '') or self.selected_instance_dir or self.settings.get('selected_instance_dir', '')
             if not self._is_remote_instance_dir(instance_dir):
                 QMessageBox.information(self, 'Modpack', self.lang_dict.get('verify_remote_only', 'Solo disponible en instancias instaladas remotamente.'))
                 return
@@ -1619,6 +1737,21 @@ class MinecraftLauncher(QWidget):
             self.remote_instance_verify_btn.setText(self.lang_dict.get('verify_modpack', 'Verificar'))
         self.remote_modpack_install_btn.setEnabled(True)
         self.remote_modpack_install_btn.setText(self.lang_dict.get('install_modpack', 'Instalar'))
+        if getattr(self, '_prelaunch_update_pending', None):
+            self._prelaunch_update_pending = None
+            if success:
+                self.log_to_console(msg)
+                self._start_java_ensure()
+            else:
+                fail_msg = self.lang_dict.get('prelaunch_mods_update_failed', 'No se pudieron actualizar los mods: {msg}').format(msg=msg)
+                self.log_to_console(fail_msg)
+                reply = QMessageBox.question(self, 'Modpack', fail_msg + '\n\n¿Continuar con el inicio de todas formas?', QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self._start_java_ensure()
+                else:
+                    self._pending_launch = None
+                    self.launch_control_stack.setCurrentIndex(0)
+            return
         if success:
             self.log_to_console(msg)
             QMessageBox.information(self, 'Modpack', msg)
@@ -2304,8 +2437,8 @@ class MinecraftLauncher(QWidget):
                 card_widget = self.mod_list_item_map[project_id]
                 card_widget.is_installed = False
                 card_widget.update_view()
-    def reinstall_version(self, version_id):
-        effective_dir = self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory
+    def reinstall_version(self, version_id, instance_dir=None):
+        effective_dir = instance_dir or (self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory)
         version_path = os.path.join(effective_dir, 'versions', version_id)
         self.log_to_console(f'Attempting to reinstall version {version_id}. Path: {version_path}')
         if os.path.exists(version_path):
@@ -2631,65 +2764,79 @@ class MinecraftLauncher(QWidget):
         total_size_str = helpers.format_size(total_size)
         total_label_text = self.lang_dict.get('total_versions_size', 'Total size: {size}').format(size=total_size_str)
         self.total_versions_size_label.setText(total_label_text)
-        grouped_sizes = {}
-        for base_version, id_list in self.grouped_versions.items():
-            group_size = sum((sizes.get(vid, 0) for vid in id_list))
-            grouped_sizes[base_version] = group_size
-        for base_version, widget in self.version_widget_map.items():
-            size = grouped_sizes.get(base_version, 0)
-            widget.update_size(size)
+        for key, widget in self.version_widget_map.items():
+            instance_dir = key[0] if isinstance(key, tuple) else self.selected_instance_dir
+            widget.update_size(sizes.get(instance_dir, 0))
     def refresh_installed_versions_list(self):
         self.installed_versions_list.clear()
         self.grouped_versions.clear()
         self.version_widget_map.clear()
         self.selected_versions_for_deletion.clear()
+        self._versions_selected_instance_dir = ''
+        self._versions_selected_source = ''
         self.update_delete_button_state()
         self.total_versions_size_label.setText(self.lang_dict.get('calculating_size', 'Calculating size...'))
         try:
-            effective_dir = self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory
-            installed = minecraft_launcher_lib.utils.get_installed_versions(effective_dir)
-            if not installed:
+            instances = []
+            try:
+                base_installed = minecraft_launcher_lib.utils.get_installed_versions(self.minecraft_directory)
+            except Exception:
+                base_installed = []
+            if base_installed:
+                instances.append({'name': self.lang_dict.get('base_instance_name', 'Base'), 'instance_dir': self.minecraft_directory, 'source': ''})
+            for inst in self._scan_remote_instances():
+                instances.append({'name': inst.get('name') or os.path.basename(inst['instance_dir'].rstrip('\\/')), 'instance_dir': inst['instance_dir'], 'source': inst.get('source', 'remote')})
+            if not instances:
                 item = QListWidgetItem(self.lang_dict.get('no_versions_installed', 'No versions installed.'))
                 item.setTextAlignment(Qt.AlignCenter)
                 self.installed_versions_list.addItem(item)
                 self.total_versions_size_label.setText('')
                 self._update_remote_verify_button()
                 return
-            else:
-                all_version_ids = []
+            all_instance_dirs = []
+            for inst in instances:
+                instance_dir = inst['instance_dir']
+                all_instance_dirs.append(instance_dir)
+                try:
+                    installed = minecraft_launcher_lib.utils.get_installed_versions(instance_dir)
+                except Exception:
+                    installed = []
+                if not installed:
+                    continue
+                instance_name = inst.get('name') or os.path.basename(instance_dir.rstrip('\\/'))
+                source = inst.get('source', '')
+                can_rename = source in ('manual', 'mrpack') or not source
+                by_base = {}
                 for version_info in installed:
                     version_id = version_info['id']
-                    all_version_ids.append(version_id)
                     base_v = helpers.get_base_version(version_id)
-                    if base_v not in self.grouped_versions:
-                        self.grouped_versions[base_v] = []
-                    self.grouped_versions[base_v].append(version_id)
-                instance_name = os.path.basename(effective_dir.rstrip('\\/'))
-                meta = load_instance_meta(effective_dir) if effective_dir else {}
-                source = meta.get('source', '')
-                can_rename = source in ('manual', 'mrpack') or not source
-                for base_version, id_list in sorted(self.grouped_versions.items(), key=lambda item: helpers.version_key(item[0]), reverse=True):
+                    by_base.setdefault(base_v, []).append(version_id)
+                for base_version, id_list in sorted(by_base.items(), key=lambda item: helpers.version_key(item[0]), reverse=True):
+                    key = (instance_dir, base_version)
+                    self.grouped_versions[key] = id_list
                     version_types = sorted(list(set((helpers.get_version_type(vid) for vid in id_list))))
                     item = QListWidgetItem()
                     item.setSizeHint(QSize(0, 85))
+                    item.setData(Qt.UserRole, {'instance_dir': instance_dir, 'source': source, 'base_version': base_version})
                     display_name = f'{base_version} — {instance_name}'
                     widget = VersionListItemWidget(display_name, version_types, self.version_management_icons, self.lang_dict, can_rename=can_rename)
-                    widget.delete_requested.connect(partial(self.handle_version_action, 'delete', base_version))
-                    widget.repair_requested.connect(partial(self.handle_version_action, 'repair', base_version))
-                    widget.open_folder_requested.connect(partial(self.handle_version_action, 'open_folder', base_version))
-                    widget.rename_requested.connect(self.handle_rename_instance)
-                    widget.selection_changed.connect(self.on_version_selection_changed)
+                    widget.delete_requested.connect(partial(self.handle_version_action, 'delete', base_version, instance_dir))
+                    widget.repair_requested.connect(partial(self.handle_version_action, 'repair', base_version, instance_dir))
+                    widget.open_folder_requested.connect(partial(self.handle_version_action, 'open_folder', base_version, instance_dir))
+                    widget.rename_requested.connect(partial(self.handle_rename_instance, base_version, instance_dir))
+                    widget.selection_changed.connect(partial(self.on_version_selection_changed, instance_dir))
                     self.installed_versions_list.addItem(item)
                     self.installed_versions_list.setItemWidget(item, widget)
-                    self.version_widget_map[base_version] = widget
-                if self.version_size_scanner and self.version_size_scanner.isRunning():
-                        self.version_size_scanner.requestInterruption()
-                        self.version_size_scanner.wait()
-                versions_path = os.path.join(effective_dir, 'versions')
-                self.version_size_scanner = VersionSizeScannerWorker(versions_path, all_version_ids, self)
-                self.version_size_scanner.finished.connect(self.on_version_sizes_scanned)
-                self.version_size_scanner.start()
-                self._update_remote_verify_button()
+                    self.version_widget_map[key] = widget
+            if self.version_size_scanner and self.version_size_scanner.isRunning():
+                self.version_size_scanner.requestInterruption()
+                self.version_size_scanner.wait()
+            self.version_size_scanner = VersionSizeScannerWorker(all_instance_dirs, self)
+            self.version_size_scanner.finished.connect(self.on_version_sizes_scanned)
+            self.version_size_scanner.start()
+            if self.installed_versions_list.count():
+                self.installed_versions_list.setCurrentRow(0)
+            self._update_remote_verify_button()
         except Exception as e:
             self.log_to_console(f'Error scanning for installed versions: {e}')
             logging.error(f'Error scanning for installed versions: {traceback.format_exc()}')
@@ -2698,16 +2845,16 @@ class MinecraftLauncher(QWidget):
             self.installed_versions_list.addItem(item)
             self.total_versions_size_label.setText('')
             return None
-    def handle_version_action(self, action_type, base_version, *args):
+    def handle_version_action(self, action_type, base_version, instance_dir=None, *args):
         if action_type == 'open_folder':
-            effective_dir = self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory
+            effective_dir = instance_dir or (self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory)
             if os.path.exists(effective_dir):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(effective_dir))
             else:
                 QMessageBox.warning(self, 'Error', f'Folder for instance \'{effective_dir}\' not found.')
         else:
             if action_type == 'delete':
-                effective_dir = self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory
+                effective_dir = instance_dir or (self.selected_instance_dir if self.selected_instance_dir and os.path.isdir(self.selected_instance_dir) else self.minecraft_directory)
                 instance_name = os.path.basename(effective_dir.rstrip('\\/'))
                 confirm_title = self.lang_dict.get('confirm_delete_title', 'Confirmar Eliminación')
                 confirm_text = self.lang_dict.get('confirm_multi_delete_text', '¿Estás seguro de que quieres eliminar las siguientes {count} versiones?\n\n - {versions}').format(count=1, versions=instance_name)
@@ -2716,10 +2863,11 @@ class MinecraftLauncher(QWidget):
                     try:
                         if os.path.isdir(effective_dir):
                             shutil.rmtree(effective_dir)
-                        self.selected_instance_dir = ''
-                        self.settings['selected_instance_dir'] = ''
-                        settings.save_settings(self.settings)
-                        self.installed_mods_path = os.path.join(self.minecraft_directory, 'installed_mods.json')
+                        if self.selected_instance_dir and os.path.normcase(self.selected_instance_dir) == os.path.normcase(effective_dir):
+                            self.selected_instance_dir = ''
+                            self.settings['selected_instance_dir'] = ''
+                            settings.save_settings(self.settings)
+                            self.installed_mods_path = os.path.join(self.minecraft_directory, 'installed_mods.json')
                         self.refresh_installed_versions_list()
                         self.populate_versions(self.current_version_type)
                         self.log_to_console(f'Instance \'{instance_name}\' deleted.')
@@ -2727,7 +2875,7 @@ class MinecraftLauncher(QWidget):
                         QMessageBox.critical(self, 'Error', f'Couldn\'t delete instance folder:\n{e}')
                         return
             else:
-                versions_in_group = self.grouped_versions.get(base_version, [])
+                versions_in_group = self.grouped_versions.get((instance_dir, base_version), [])
                 version_to_act_on = None
                 if len(versions_in_group) == 1:
                     version_to_act_on = versions_in_group[0]
@@ -2747,9 +2895,9 @@ class MinecraftLauncher(QWidget):
                         confirm_text = self.lang_dict.get(f'confirm_{action_type}_text', 'Are you sure?').format(version_id=version_to_act_on)
                         reply = QMessageBox.question(self, confirm_title, confirm_text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                         if reply == QMessageBox.Yes:
-                            self.reinstall_version(version_to_act_on)
-    def handle_rename_instance(self, _display_name):
-        instance_dir = self.selected_instance_dir
+                            self.reinstall_version(version_to_act_on, instance_dir)
+    def handle_rename_instance(self, base_version=None, instance_dir=None, _display_name=None):
+        instance_dir = instance_dir or self.selected_instance_dir
         if not instance_dir or not os.path.isdir(instance_dir):
             QMessageBox.warning(self, 'Error', 'No instance selected.')
             return
@@ -2834,7 +2982,7 @@ class MinecraftLauncher(QWidget):
         if hasattr(self, '_mrpack_worker') and self._mrpack_worker and self._mrpack_worker.isRunning():
                     self._mrpack_worker.stop()
                     self._mrpack_worker.wait(500)
-        worker_list = ['worker', 'java_ensure_worker', 'version_loader', 'mod_search_worker', 'local_mods_scanner', 'version_size_scanner']
+        worker_list = ['worker', 'java_ensure_worker', 'version_loader', 'mod_search_worker', 'local_mods_scanner', 'version_size_scanner', 'prelaunch_mods_worker']
         for worker_attr in worker_list:
             worker = getattr(self, worker_attr, None)
             if worker and worker.isRunning():
@@ -2854,11 +3002,12 @@ class MinecraftLauncher(QWidget):
     def show(self):
         super().show()
         self.fade_in_animation.start()
-    def on_version_selection_changed(self, base_version, is_selected):
+    def on_version_selection_changed(self, instance_dir, base_version, is_selected):
+        key = (instance_dir, base_version)
         if is_selected:
-            self.selected_versions_for_deletion.add(base_version)
+            self.selected_versions_for_deletion.add(key)
         else:
-            self.selected_versions_for_deletion.discard(base_version)
+            self.selected_versions_for_deletion.discard(key)
         self.update_delete_button_state()
     def update_delete_button_state(self):
         is_enabled = len(self.selected_versions_for_deletion) > 0
@@ -2869,8 +3018,8 @@ class MinecraftLauncher(QWidget):
             return
         else:
             versions_to_delete = []
-            for base_version in self.selected_versions_for_deletion:
-                versions_to_delete.extend(self.grouped_versions.get(base_version, []))
+            for key in self.selected_versions_for_deletion:
+                versions_to_delete.extend(self.grouped_versions.get(key, []))
             if not versions_to_delete:
                 return
             else:
@@ -2883,7 +3032,9 @@ class MinecraftLauncher(QWidget):
                 reply = QMessageBox.question(self, confirm_title, confirm_text, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 if reply == QMessageBox.Yes:
                     self.log_to_console(f'Starting deletion of {len(versions_to_delete)} selected versions...')
-                    for version_id in versions_to_delete:
-                        self.reinstall_version(version_id)
+                    for key in sorted(self.selected_versions_for_deletion):
+                        instance_dir = key[0]
+                        for version_id in self.grouped_versions.get(key, []):
+                            self.reinstall_version(version_id, instance_dir)
                     self.log_to_console('Deletion complete.')
                     self.refresh_installed_versions_list()

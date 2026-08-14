@@ -23,6 +23,12 @@ backup/
 KazLauncher_new.exe
 latest.json
 
+# Proyectos externos que no pertenecen al launcher
+puter_integration/
+puter_setup.js
+vscode_gpt_bridge/
+*.vsix
+
 # Metadatos locales del editor/agente
 .freebuff/
 

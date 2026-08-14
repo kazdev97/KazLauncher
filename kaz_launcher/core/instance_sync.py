@@ -212,7 +212,7 @@ def list_local_mod_filenames(mods_dir: str) -> set[str]:
     else:
         return {name for name in os.listdir(mods_dir) if name.lower().endswith(('.jar', '.jar.disabled'))}
 # return {'on_status': None}
-def verify_remote_mods(manifest: dict, instance_dir: str, lang_dict: dict, *, on_status: StatusCallback) -> ModSyncReport:
+def verify_remote_mods(manifest: dict, instance_dir: str, lang_dict: dict, *, on_status: StatusCallback = None) -> ModSyncReport:
     report = ModSyncReport()
     game_version = str(manifest.get('game_version') or '').strip()
     loader = str(manifest.get('loader') or 'forge').strip().lower()
@@ -235,7 +235,7 @@ def verify_remote_mods(manifest: dict, instance_dir: str, lang_dict: dict, *, on
         report.up_to_date = not report.missing and (not report.extra)
         return report
 # return {'on_status': None, 'apply_changes': True, 'prune_extra': True}
-def sync_remote_mods(manifest: dict, instance_dir: str, lang_dict: dict, *, on_status: StatusCallback, apply_changes: bool, prune_extra: bool) -> tuple[ModSyncReport, bool, str]:
+def sync_remote_mods(manifest: dict, instance_dir: str, lang_dict: dict, *, on_status: StatusCallback = None, apply_changes: bool, prune_extra: bool) -> tuple[ModSyncReport, bool, str]:
     """\n    Compara mods/ con el manifest. Si apply_changes, descarga faltantes y elimina sobrantes.\n    """
     report = verify_remote_mods(manifest, instance_dir, lang_dict, on_status=on_status)
     if report.errors:
