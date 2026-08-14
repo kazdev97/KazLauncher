@@ -1,100 +1,33 @@
 # KazLauncher
 
-KazLauncher is a custom Minecraft launcher built with Python and PySide6, providing a sleek interface for launching various Minecraft versions, including Vanilla, Forge, and Fabric. It features customizable settings, console output, and dynamic version loading.
-
+KazLauncher es un launcher personalizado de Minecraft basado en [hru](https://github.com/krutoychel24/hru-hru-launcher) desarrollado con Python y PySide6, que ofrece una interfaz elegante para iniciar diversas versiones de Minecraft, incluyendo Vanilla, Forge, Fabric y NeoForge. Cuenta con configuraciones personalizables, salida de consola y carga dinámica de versiones.
 ---
 ## Features
-
-* **Multi-Version Support:** Easily launch Vanilla, Forge, and Fabric versions of Minecraft.
-* **User-Friendly Interface:** A clean and intuitive graphical user interface (GUI) built with PySide6.
-* **Customizable Settings:** Adjust language (English/Russian/Ukrainian), theme (Dark, Light, Neon), allocated memory, fullscreen mode, and launcher behavior after game launch.
-* **Advanced JVM Arguments:** Option to enable G1GC for improved performance.
-* **Dynamic Version Loading:** Automatically fetches available Minecraft versions (Vanilla, Forge, Fabric).
-* **Integrated Console:** View real-time game output and launcher logs within the application.
-* **Custom Data Directories:** Game runtime data (logs, saves, resource packs) are stored in a dedicated user-friendly folder, while core Minecraft installations remain in the standard `.minecraft` directory.
-* **Modular Codebase:** The code has been split into organized modules for better maintainability and scalability.
-* **Mod Installation (Beta):** Basic mod installation support with improved mod search, pagination, and a page listing installed mods.
-* **Version Manager:** View, delete, or manage installed Minecraft versions directly from the launcher.
-* **AutoFix Function:** Automatically fixes common issues during launch or installation.
-* **Automatic RAM Detection:** Launcher can detect and recommend optimal RAM allocation.
-* **Cancel Installations:** Option to cancel ongoing Minecraft installations.
-* **Installer Available:** A downloadable setup file is now provided for easier installation.
-
+* **Soporte Multiversión:** Inicia fácilmente versiones Vanilla, Forge, Fabric y Neoforge de Minecraft.
+* **Interfaz Amigable:** Una interfaz gráfica de usuario (GUI) limpia e intuitiva desarrollada con PySide6.
+* **Configuración Personalizable:** tema (Oscuro(Default), Glass, Skeumorph), memoria asignada, modo de pantalla completa y comportamiento del launcher después de iniciar el juego.
+* **Argumentos JVM Avanzados:** G1GC para mejorar el rendimiento.
+* **Carga Dinámica de Versiones:** Obtiene automáticamente las versiones disponibles de Minecraft (Vanilla, Forge, Fabric).
+* **Consola Integrada:** Visualiza en tiempo real la salida del juego y los registros del launcher dentro de la aplicación.
+* **Directorios de Datos Personalizados:** Los datos de ejecución del juego (registros, partidas guardadas, paquetes de recursos) se almacenan en una carpeta dedicada y fácil de usar.
+* **Código Modular:** El código se ha dividido en módulos organizados para facilitar su mantenimiento y escalabilidad.
+* **Integracion de Modrinth (Beta):** Soporte básico para la instalación de mods con búsqueda mejorada, paginación e importacion de archivos mrpack.
+* **Administrador de Versiones:** Visualiza, elimina o administra las versiones de Minecraft instaladas directamente desde el launcher.
+* **Detección Automática de RAM:** El launcher puede detectar y recomendar una cantidad óptima de RAM para asignar.
+* **Modpacks remotos:** instalacion automatica de modpacks para series y eventos mios.
 ---
 
 ### 👋 Contact me:
 
 <p align="left">
-  <a href="https://t.me/krutoychel24" target="_blank">
-    <img src="https://img.shields.io/badge/Telegram-@krutoychel24-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="telegram"/>
+  <a href="https://x.com/EseDjKaz" target="_blank">
+    <img src="https://img.shields.io/badge/S%C3%ADgueme%20en-X-000000?style=for-the-badge&logo=x&logoColor=white" alt="X"/>
   </a>
-  <a href="https://discord.gg/t485rd37" target="_blank">
-    <img src="https://img.shields.io/badge/Discord-KazStudio-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="discord"/>
-  </a>
-  <a href="mailto:krutoychel.info@gmail.com">
-    <img src="https://img.shields.io/badge/Gmail-Write-D14836?style=for-the-badge&logo=gmail&logoColor=white" alt="gmail"/>
+  <a href="https://www.twitch.tv/soy_kaz" target="_blank">
+    <img src="https://img.shields.io/badge/S%C3%ADgueme%20en-Twitch-9146FF?style=for-the-badge&logo=twitch&logoColor=white" alt="Twitch"/>
   </a>
 </p>
 
-## Preview
-
-![Launcher Screenshot](https://i.postimg.cc/y8hygM23/Screenshot-2025-07-14-050917.png)
-
-## Installation (for Developers)
-
-To set up and run this project locally, follow these steps:
-
-### Prerequisites
-
-* **Python 3.11, 3.12, or 3.13:** It's recommended to use these Python versions for optimal compatibility with PyInstaller. You can download them from [python.org/downloads](https://www.python.org/downloads/). Ensure you add Python to your system's PATH during installation.
-* **Java Runtime Environment (JRE) or Java Development Kit (JDK):** Minecraft requires Java to run. Ensure you have a compatible Java version installed on your system.
-
-### Setup
-
-1.  **Clone the repository** (or download the source code):
-    ```bash
-    git clone https://github.com/krutoychel24/hru-hru-launcher
-    cd hru-hru-launcher
-    ```
-2.  **Create a Virtual Environment** (highly recommended):
-    ```bash
-    python -m venv venv
-    ```
-
-3.  **Activate the Virtual Environment**:
-    * **On Windows (Command Prompt):**
-        ```bash
-        .\venv\Scripts\activate
-        ```
-    * **On Windows (PowerShell):**
-        ```bash
-        .\venv\Scripts\Activate.ps1
-        ```
-
-4.  **Install the required Python packages**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-
----
-
-## Running the Launcher (Development Mode)
-
-After setting up the environment, you can run the launcher directly from the Python script:
-
-```bash
-python -m kaz_launcher.main
-```
-
----
-
-### Also featured on:
-* Dev.to article — [Introducing KazLauncher: A Custom Minecraft Launcher in Python](https://dev.to/krutoychel24/introducing-hruhrulauncher-a-custom-minecraft-launcher-written-in-python-with-pyside6-h2i)
-* Libhunt listing — [KazLauncher on Python LibHunt](https://python.libhunt.com/hru-hru-launcher-alternatives)
-
-Feel free to ⭐️ the project or share your thoughts — all feedback is welcome!
-
----
 
 ### Disclaimer
 
