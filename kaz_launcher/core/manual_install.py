@@ -75,7 +75,7 @@ def install_manual_instance(*, loader: str, minecraft_version: str, loader_versi
     instance_dir = _unique_instance_dir(instancias_root, _sanitize_folder_name('_'.join(folder_bits)))
     os.makedirs(instance_dir, exist_ok=True)
     callback = {'setStatus': lambda t: status(t)}
-    java_exe = get_java_for_installer(java_path)
+    java_exe = get_java_for_installer(java_path, mc_version=mc_version, on_status=status)
     try:
         if loader == 'vanilla':
             status(f'Instalando Minecraft {mc_version}...')

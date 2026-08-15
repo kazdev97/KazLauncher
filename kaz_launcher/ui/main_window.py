@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.8'
+APP_VERSION = 'v1.2.9'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20

@@ -5,7 +5,7 @@ import json
 import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Callable, Optional
 import minecraft_launcher_lib
 from minecraft_launcher_lib import mod_loader
 import minecraft_launcher_lib.fabric
@@ -263,8 +263,28 @@ def _extra_java_dirs():
             extra.append(os.path.join(la, 'Programs', 'Eclipse Adoptium'))
             extra.append(os.path.join(la, 'Microsoft', 'OpenJDK'))
         return extra
-def get_java_for_installer(java_path_from_settings: Optional[str]=None) -> Optional[str]:
-    """Obtiene una ruta válida a Java para el instalador de Forge."""
+def _bundled_java_for_installer(mc_version: Optional[str]=None) -> Optional[str]:
+    """Busca el Java portable que el launcher ya tiene en runtime/jdk-*."""
+    from kaz_launcher.utils.java_installer import get_bundled_java_executable
+    from kaz_launcher.utils.java_resolver import required_java_major
+    majors = []
+    if mc_version:
+        majors.append(required_java_major(mc_version))
+    for m in (17, 21, 8):
+        if m not in majors:
+            majors.append(m)
+    for major in majors:
+        exe = get_bundled_java_executable(major)
+        if exe:
+            return exe
+    return None
+def get_java_for_installer(java_path_from_settings: Optional[str]=None, mc_version: Optional[str]=None, on_status: Optional[Callable[[str], None]]=None) -> Optional[str]:
+    """Obtiene una ruta válida a Java para el instalador de Forge.
+
+    Orden de resolución: ruta configurada en ajustes -> Java del sistema
+    (get_java_executable y carpetas estándar) -> Java portable del launcher
+    (runtime/jdk-*) -> auto-instalación de Adoptium si no hay nada.
+    """
     if (java_path_from_settings or '').strip() and os.path.isfile(java_path_from_settings.strip()):
         return java_path_from_settings.strip()
     try:
@@ -282,8 +302,18 @@ def get_java_for_installer(java_path_from_settings: Optional[str]=None) -> Optio
                 if os.path.isfile(full):
                     return full
     except Exception:
+        pass
+    bundled = _bundled_java_for_installer(mc_version)
+    if bundled:
+        return bundled
+    try:
+        from kaz_launcher.utils.java_installer import install_portable_jdk
+        from kaz_launcher.utils.java_resolver import required_java_major
+        required = required_java_major(mc_version) if mc_version else 17
+        return install_portable_jdk(required, on_status=on_status)
+    except Exception as exc:
+        logging.error('No se pudo instalar Java portable para Forge: %s', exc)
         return None
-    return None
 def scan_folder(folder_path: str) -> list[dict]:
     """\n    Escanea una carpeta en busca de modpack.json (o subcarpetas que lo contengan).\n    Devuelve lista de { \"path\": ruta del manifest, \"name\": nombre, \"manifest\": dict }.\n    """
     if not folder_path or not os.path.isdir(folder_path):
@@ -426,7 +456,7 @@ def install_modpack(manifest: dict, minecraft_dir: str, lang_dict: dict, java_pa
                 break
         if not version_id_to_use:
             set_status(f'Instalando Forge {forge_version}...')
-            java_exe = get_java_for_installer(java_path)
+            java_exe = get_java_for_installer(java_path, mc_version=game_version, on_status=set_status)
             try:
                 run_forge_install_tolerant(
                     lambda: minecraft_launcher_lib.forge.install_forge_version(forge_version, working_dir, callback=callback, java=java_exe),
@@ -434,7 +464,10 @@ def install_modpack(manifest: dict, minecraft_dir: str, lang_dict: dict, java_pa
                     minecraft_launcher_lib.forge.forge_to_installed_version(forge_version),
                 )
             except Exception as e:
-                return (False, f'Error instalando Forge: {friendly_download_error(e)}. Comprueba que Java esté instalado y configurado.')
+                msg = friendly_download_error(e)
+                if isinstance(e, OSError) and getattr(e, 'errno', None) == 2:
+                    msg = f'{msg} No se encontró Java para ejecutar el instalador de Forge.'
+                return (False, f'Error instalando Forge: {msg}')
     elif loader == 'fabric':
         installed = minecraft_launcher_lib.utils.get_installed_versions(working_dir)
         has_fabric = any(('fabric' in v['id'] for v in installed))
@@ -453,7 +486,7 @@ def install_modpack(manifest: dict, minecraft_dir: str, lang_dict: dict, java_pa
             has_neoforge = any(('neoforge' in v['id'] for v in installed))
             if not has_neoforge:
                 set_status(f'Instalando NeoForge {loader_version}...')
-                java_exe = get_java_for_installer(java_path)
+                java_exe = get_java_for_installer(java_path, mc_version=game_version, on_status=set_status)
                 run_install_with_retries(lambda: ml.install(game_version, working_dir, loader_version=loader_version, callback=callback, java=java_exe))
         except Exception as e:
             return (False, f'Error instalando NeoForge: {friendly_download_error(e)}')
@@ -517,7 +550,7 @@ def install_mrpack(mrpack_path: str, minecraft_dir: str, lang_dict: dict, progre
             status(f'Installing Forge {loader_version}...')
             forge_version = f'{mc_version}-{loader_version}' if '-' not in loader_version else loader_version
             run_forge_install_tolerant(
-                lambda: minecraft_launcher_lib.forge.install_forge_version(forge_version, instance_dir, java=get_java_for_installer(None)),
+                lambda: minecraft_launcher_lib.forge.install_forge_version(forge_version, instance_dir, java=get_java_for_installer(None, mc_version=mc_version, on_status=status)),
                 instance_dir,
                 minecraft_launcher_lib.forge.forge_to_installed_version(forge_version),
             )
@@ -533,7 +566,7 @@ def install_mrpack(mrpack_path: str, minecraft_dir: str, lang_dict: dict, progre
             java_path = None
             if not loader_version:
                 loader_version = run_install_with_retries(lambda: ml.get_latest_loader_version(mc_version))
-            run_install_with_retries(lambda: ml.install(mc_version, instance_dir, loader_version=loader_version, java=get_java_for_installer(java_path)))
+            run_install_with_retries(lambda: ml.install(mc_version, instance_dir, loader_version=loader_version, java=get_java_for_installer(java_path, mc_version=mc_version, on_status=status)))
 
         installed = minecraft_launcher_lib.utils.get_installed_versions(instance_dir)
         version_id = ''
