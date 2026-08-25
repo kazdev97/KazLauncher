@@ -48,7 +48,7 @@ from kaz_launcher.utils.instance_registry import resolve_version_id, save_instan
 from kaz_launcher.utils.account_store import find_account, remove_account, set_account_mode, upsert_account
 from .dialogs import FixErrorDialog, AdvancedSettingsDialog, PasswordDialog, NewInstallationDialog, UpdateDialog
 from kaz_launcher.core import updater
-APP_VERSION = 'v1.2.9'
+APP_VERSION = 'v1.2.10'
 MODPACK_MANIFEST_URL = 'https://i0002.clarodrive.com/s/if5ar9aE7QCrWFk'
 NEWS_REMOTE_URL = 'https://drive.google.com/file/d/1i7dOiFDCNA58M9t1xNh6bSoCPYS8xFzV/view?usp=sharing'
 MODS_PER_PAGE = 20
@@ -213,8 +213,9 @@ class ModpackVerifyWorker(QThread):
             success, msg = remote_modpack.verify_remote_instance(self.manifest, self.instance_dir, self.lang_dict)
         self.finished.emit(success, msg)
 class PreLaunchModsCheckWorker(QThread):
-    """Verifica mods de una instancia remota contra su manifest antes de jugar."""
+    """Verifica mods y archivos de configuración de una instancia remota contra su manifest antes de jugar."""
     finished = Signal(object, object, str)
+    status = Signal(str)
     def __init__(self, minecraft_dir, instance_dir, manifest_url, cached_manifests, lang_dict, parent=None):
         super().__init__(parent)
         self.minecraft_dir = minecraft_dir
@@ -246,12 +247,22 @@ class PreLaunchModsCheckWorker(QThread):
                 return manifest
         return None
     def run(self):
-        from kaz_launcher.core.instance_sync import verify_remote_mods
+        from kaz_launcher.core.instance_sync import verify_remote_mods, sync_instance_files, collect_manifest_files
         try:
             manifest = self.find_manifest(self.minecraft_dir, self.instance_dir, self.manifest_url, self.cached_manifests)
             if not manifest:
                 self.finished.emit(None, None, '')
                 return
+            file_entries = collect_manifest_files(manifest)
+            non_mod_files = [e for e in file_entries if not e['path'].lower().startswith('mods/')]
+            if non_mod_files:
+                self.status.emit(f'Verificando {len(non_mod_files)} archivos del modpack (configs, resourcepacks)...')
+                ok, err = sync_instance_files(manifest, self.instance_dir, folders_filter=None, exclude_folders={'mods'}, on_status=self.status.emit)
+                if not ok:
+                    logging.warning('Error sincronizando configs/resourcepacks: %s', err)
+                    self.status.emit('No se pudieron actualizar algunos archivos del modpack.')
+                else:
+                    self.status.emit('Archivos del modpack verificados y actualizados.')
             report = verify_remote_mods(manifest, self.instance_dir, self.lang_dict)
             self.finished.emit(manifest, report, '')
         except Exception as exc:
@@ -510,10 +521,14 @@ class MinecraftLauncher(QWidget):
         self._prelaunch_instance_dir = instance_dir
         self._prelaunch_mods_worker = PreLaunchModsCheckWorker(self.minecraft_directory, instance_dir, MODPACK_MANIFEST_URL, cached, self.lang_dict, self)
         self._prelaunch_mods_worker.finished.connect(self._on_prelaunch_mods_check_finished)
+        self._prelaunch_mods_worker.status.connect(self._on_prelaunch_status)
         self._prelaunch_mods_worker.start()
         msg = self.lang_dict.get('verifying_mods_before_launch', 'Verificando mods...')
         self.progress_bar.setFormat(msg)
         self.log_to_console(msg)
+    def _on_prelaunch_status(self, message: str):
+        self.progress_bar.setFormat(message)
+        self.log_to_console(message)
     def _on_prelaunch_mods_check_finished(self, manifest, report, error):
         pending = getattr(self, '_pending_launch', None)
         if not pending:

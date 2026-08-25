@@ -369,15 +369,22 @@ def verify_remote_instance(manifest: dict, instance_dir: str, lang_dict: dict) -
             else:
                 return (False, lang_dict.get('modpack_diff_found', 'Hay diferencias en mods.'))
 def update_remote_instance_mods(manifest: dict, instance_dir: str, lang_dict: dict, callback: Optional[dict]=None) -> tuple[bool, str]:
-    """Actualiza solo la carpeta mods/ según el manifest."""
+    """Actualiza mods/ y archivos de configuración (FancyMenu, resourcepacks, etc.) según el manifest."""
     callback = callback or {}
     def set_status(text: str):
         callback.get('setStatus', lambda _: None)(text)
+    file_entries = collect_manifest_files(manifest)
+    non_mod_files = [e for e in file_entries if not e['path'].lower().startswith('mods/')]
+    if non_mod_files:
+        set_status('Sincronizando configs y resourcepacks...')
+        ok, err = sync_instance_files(manifest, instance_dir, folders_filter=None, exclude_folders={'mods'}, on_status=set_status)
+        if not ok:
+            return (False, err)
     report, ok, summary = sync_remote_mods(manifest, instance_dir, lang_dict, on_status=set_status, apply_changes=True, prune_extra=True)
     if not ok:
         return (False, summary)
     else:
-        if summary == 'up_to_date' or report.up_to_date:
+        if summary == 'up_to_date' and report.up_to_date and not non_mod_files:
             return (True, lang_dict.get('modpack_up_to_date', 'Ya tienes la última versión.'))
         else:
             return (True, lang_dict.get('modpack_updated_ok', 'Instancia actualizada correctamente.'))
@@ -422,7 +429,7 @@ def install_modpack(manifest: dict, minecraft_dir: str, lang_dict: dict, java_pa
     non_mod_files = [e for e in file_entries if not e['path'].lower().startswith('mods/')]
     if non_mod_files:
         set_status('Sincronizando archivos de configuración...')
-        ok, err = sync_instance_files(manifest, working_dir, exclude_folders={'mods'}, on_status=set_status)
+        ok, err = sync_instance_files(manifest, working_dir, folders_filter=None, exclude_folders={'mods'}, on_status=set_status)
         if not ok:
             return (False, err)
     installed_ids = [v['id'] for v in minecraft_launcher_lib.utils.get_installed_versions(working_dir)]
